@@ -1,7 +1,7 @@
-import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -37,15 +37,25 @@ def _extract_repo_name(location: RepoLocation) -> str | None:
     detect_platform only populates `repo` for recognized platforms
     (github/gitlab); for "unknown" hosts it deliberately leaves owner/repo
     as None (see repocheck.platform). Typosquatting checks should still run
-    against self-hosted/unknown git URLs, so fall back to parsing the last
-    path segment of the raw URL when the platform detector didn't give us
-    a repo name.
+    against self-hosted/unknown git URLs, so fall back to parsing the URL
+    path when the platform detector didn't give us a repo name.
+
+    The near-universal convention for git hosting URLs (GitHub, GitLab,
+    Gitea, self-hosted, etc.) is `https://host/owner/repo[/anything-else...]`,
+    so the repo name is the *second* path segment -- not simply the last
+    segment, which can be a GitLab-style branch/tree suffix (e.g.
+    `/-/tree/main`) or have a query string glued onto it.
     """
     if location.repo:
         return location.repo
-    stripped = location.url.strip().rstrip("/")
-    match = re.search(r"/([^/]+?)(\.git)?$", stripped)
-    return match.group(1) if match else None
+    path = urlsplit(location.url.strip()).path
+    segments = [segment for segment in path.split("/") if segment]
+    if len(segments) < 2:
+        return None
+    repo = segments[1]
+    if repo.endswith(".git"):
+        repo = repo[: -len(".git")]
+    return repo or None
 
 
 def run_precheck(url: str) -> PrecheckResult:

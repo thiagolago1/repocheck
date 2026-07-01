@@ -1,6 +1,7 @@
 import responses
 
-from repocheck.precheck import run_precheck
+from repocheck.platform import RepoLocation
+from repocheck.precheck import _extract_repo_name, run_precheck
 
 
 @responses.activate
@@ -79,6 +80,34 @@ def test_precheck_flags_typosquat_candidate():
 
     assert result.possible_typosquat is True
     assert result.typosquat_match == "react"
+
+
+def test_extract_repo_name_ignores_gitlab_tree_suffix():
+    """A GitLab-style '/-/tree/<branch>' suffix must not be mistaken for the
+    repo name -- the repo name is the second path segment (owner/repo),
+    not whatever trailing segment happens to be last in the URL."""
+    location = RepoLocation(
+        platform="unknown",
+        owner=None,
+        repo=None,
+        url="https://git.example.com/team/project/-/tree/main",
+    )
+
+    assert _extract_repo_name(location) == "project"
+
+
+def test_extract_repo_name_strips_query_string():
+    """A query string glued onto the last path segment (e.g. '?ref=main')
+    must be stripped so the typosquat check compares against the bare repo
+    name, not 'project?ref=main'."""
+    location = RepoLocation(
+        platform="unknown",
+        owner=None,
+        repo=None,
+        url="https://git.example.com/team/project?ref=main",
+    )
+
+    assert _extract_repo_name(location) == "project"
 
 
 @responses.activate

@@ -238,3 +238,70 @@ def test_run_raises_vm_command_timeout_on_subprocess_timeout():
                 ):
                     with pytest.raises(VMCommandTimeout):
                         vm.run(["sleep", "999"], timeout=10.0)
+
+
+from pathlib import Path
+
+from repocheck.vm import VMTransferError
+
+
+def test_push_file_calls_multipass_transfer_with_correct_args():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),  # launch
+            _mock_completed(returncode=0),  # transfer
+            _mock_completed(returncode=0),  # delete
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses) as mock_run:
+            with EphemeralVM() as vm:
+                name = vm.name
+                vm.push_file(Path("/tmp/analyze.py"), "/home/ubuntu/analyze.py")
+
+    transfer_call = mock_run.call_args_list[1]
+    assert transfer_call.args[0] == [
+        "multipass", "transfer", "/tmp/analyze.py", f"{name}:/home/ubuntu/analyze.py",
+    ]
+
+
+def test_push_file_raises_vm_transfer_error_on_failure():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),  # launch
+            _mock_completed(returncode=1, stderr="no such file"),  # transfer
+            _mock_completed(returncode=0),  # delete
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses):
+            with EphemeralVM() as vm:
+                with pytest.raises(VMTransferError, match="no such file"):
+                    vm.push_file(Path("/tmp/missing.py"), "/home/ubuntu/missing.py")
+
+
+def test_pull_file_calls_multipass_transfer_with_correct_args():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),  # launch
+            _mock_completed(returncode=0),  # transfer
+            _mock_completed(returncode=0),  # delete
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses) as mock_run:
+            with EphemeralVM() as vm:
+                name = vm.name
+                vm.pull_file("/home/ubuntu/report.json", Path("/tmp/report.json"))
+
+    transfer_call = mock_run.call_args_list[1]
+    assert transfer_call.args[0] == [
+        "multipass", "transfer", f"{name}:/home/ubuntu/report.json", "/tmp/report.json",
+    ]
+
+
+def test_pull_file_raises_vm_transfer_error_on_failure():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),  # launch
+            _mock_completed(returncode=1, stderr="permission denied"),  # transfer
+            _mock_completed(returncode=0),  # delete
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses):
+            with EphemeralVM() as vm:
+                with pytest.raises(VMTransferError, match="permission denied"):
+                    vm.pull_file("/home/ubuntu/report.json", Path("/tmp/report.json"))

@@ -3,6 +3,7 @@ import subprocess
 import uuid
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 
 
 class MultipassNotAvailable(Exception):
@@ -37,6 +38,10 @@ class VMCommandResult:
 
 
 class VMCommandTimeout(Exception):
+    pass
+
+
+class VMTransferError(Exception):
     pass
 
 
@@ -118,3 +123,29 @@ class EphemeralVM:
         return VMCommandResult(
             returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
         )
+
+    def push_file(self, local_path: Path, remote_path: str) -> None:
+        result = subprocess.run(
+            ["multipass", "transfer", str(local_path), f"{self.name}:{remote_path}"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise VMTransferError(
+                f"failed to push {local_path} to VM '{self.name}:{remote_path}': "
+                f"{result.stderr.strip()}"
+            )
+
+    def pull_file(self, remote_path: str, local_path: Path) -> None:
+        result = subprocess.run(
+            ["multipass", "transfer", f"{self.name}:{remote_path}", str(local_path)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise VMTransferError(
+                f"failed to pull VM '{self.name}:{remote_path}' to {local_path}: "
+                f"{result.stderr.strip()}"
+            )

@@ -31,6 +31,25 @@ def _age_in_days(created_at_iso: str) -> int:
     return (now - created).days
 
 
+# Path segments that mark the end of the owner/repo portion of a URL and the
+# start of a sub-path within the repo (branch/tree views, issue trackers,
+# etc.). When one of these appears, the repo name is whatever segment came
+# immediately before it -- not the segment itself, and not the last segment.
+_NON_REPO_PATH_MARKERS = {
+    "-",
+    "tree",
+    "blob",
+    "commit",
+    "commits",
+    "issues",
+    "merge_requests",
+    "pull",
+    "pulls",
+    "wiki",
+    "releases",
+}
+
+
 def _extract_repo_name(location: RepoLocation) -> str | None:
     """Best-effort repo name for typosquat matching.
 
@@ -42,9 +61,14 @@ def _extract_repo_name(location: RepoLocation) -> str | None:
 
     The near-universal convention for git hosting URLs (GitHub, GitLab,
     Gitea, self-hosted, etc.) is `https://host/owner/repo[/anything-else...]`,
-    so the repo name is the *second* path segment -- not simply the last
-    segment, which can be a GitLab-style branch/tree suffix (e.g.
-    `/-/tree/main`) or have a query string glued onto it.
+    but that "anything else" varies: GitLab uses nested groups/subgroups
+    (`owner/subgroup/repo`) as well as branch/tree suffixes glued onto the
+    repo (`owner/repo/-/tree/main`). Simply taking the second segment breaks
+    nested subgroups; simply taking the last segment breaks tree/branch
+    suffixes. So: scan for a known non-repo marker segment and take the
+    segment right before it; if there's no such marker, fall back to the
+    last segment (which correctly handles both plain `owner/repo` and
+    nested `owner/subgroup/repo` URLs).
     """
     if location.repo:
         return location.repo
@@ -52,7 +76,11 @@ def _extract_repo_name(location: RepoLocation) -> str | None:
     segments = [segment for segment in path.split("/") if segment]
     if len(segments) < 2:
         return None
-    repo = segments[1]
+    repo = segments[-1]
+    for index, segment in enumerate(segments):
+        if segment in _NON_REPO_PATH_MARKERS and index > 0:
+            repo = segments[index - 1]
+            break
     if repo.endswith(".git"):
         repo = repo[: -len(".git")]
     return repo or None

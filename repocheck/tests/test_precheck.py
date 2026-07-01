@@ -110,6 +110,20 @@ def test_extract_repo_name_strips_query_string():
     assert _extract_repo_name(location) == "project"
 
 
+def test_extract_repo_name_handles_nested_gitlab_subgroup():
+    """Nested GitLab groups/subgroups (owner/subgroup/repo) must resolve to
+    the actual repo name (last segment), not the subgroup segment that a
+    naive 'second segment' approach would pick."""
+    location = RepoLocation(
+        platform="unknown",
+        owner=None,
+        repo=None,
+        url="https://git.example.com/group/subgroup/project",
+    )
+
+    assert _extract_repo_name(location) == "project"
+
+
 @responses.activate
 def test_precheck_github_server_error_marks_unreachable_instead_of_raising():
     """A 500 from the GitHub API raises requests.exceptions.HTTPError inside

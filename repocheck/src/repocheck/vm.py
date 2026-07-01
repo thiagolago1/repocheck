@@ -2,6 +2,7 @@ import shutil
 import subprocess
 import uuid
 import warnings
+from dataclasses import dataclass
 
 
 class MultipassNotAvailable(Exception):
@@ -25,6 +26,17 @@ class VMLaunchError(Exception):
 
 
 class VMCleanupError(Exception):
+    pass
+
+
+@dataclass
+class VMCommandResult:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+class VMCommandTimeout(Exception):
     pass
 
 
@@ -90,3 +102,19 @@ class EphemeralVM:
                     raise VMCleanupError(message)
                 warnings.warn(message, RuntimeWarning, stacklevel=2)
         return False
+
+    def run(self, command: list[str], timeout: float = 60.0) -> VMCommandResult:
+        try:
+            result = subprocess.run(
+                ["multipass", "exec", self.name, "--", *command],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise VMCommandTimeout(
+                f"command timed out after {timeout}s inside VM '{self.name}': {command}"
+            ) from exc
+        return VMCommandResult(
+            returncode=result.returncode, stdout=result.stdout, stderr=result.stderr
+        )

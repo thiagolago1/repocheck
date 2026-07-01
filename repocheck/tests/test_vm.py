@@ -201,3 +201,40 @@ def test_exit_warns_instead_of_raising_when_delete_raises_and_exception_already_
                 with pytest.raises(RuntimeError, match="original error"):
                     with EphemeralVM():
                         raise RuntimeError("original error")
+
+
+from repocheck.vm import VMCommandResult, VMCommandTimeout
+
+
+def test_run_executes_command_and_returns_result():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),  # launch
+            _mock_completed(returncode=0, stdout="hello\n", stderr=""),  # run
+            _mock_completed(returncode=0),  # delete
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses) as mock_run:
+            with EphemeralVM() as vm:
+                name = vm.name
+                result = vm.run(["echo", "hello"], timeout=10.0)
+
+    assert result == VMCommandResult(returncode=0, stdout="hello\n", stderr="")
+    run_call = mock_run.call_args_list[1]
+    assert run_call.args[0] == ["multipass", "exec", name, "--", "echo", "hello"]
+    assert run_call.kwargs["timeout"] == 10.0
+
+
+def test_run_raises_vm_command_timeout_on_subprocess_timeout():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),  # launch
+            _mock_completed(returncode=0),  # delete (runs after the nested patch below reverts)
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses):
+            with EphemeralVM() as vm:
+                with patch(
+                    "repocheck.vm.subprocess.run",
+                    side_effect=subprocess.TimeoutExpired(cmd="multipass exec", timeout=10.0),
+                ):
+                    with pytest.raises(VMCommandTimeout):
+                        vm.run(["sleep", "999"], timeout=10.0)

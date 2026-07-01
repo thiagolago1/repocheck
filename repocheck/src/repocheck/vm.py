@@ -1,5 +1,7 @@
 import shutil
 import subprocess
+import uuid
+import warnings
 
 
 class MultipassNotAvailable(Exception):
@@ -16,3 +18,66 @@ def check_multipass_available() -> bool:
     except (subprocess.TimeoutExpired, OSError):
         return False
     return result.returncode == 0
+
+
+class VMLaunchError(Exception):
+    pass
+
+
+class VMCleanupError(Exception):
+    pass
+
+
+DEFAULT_IMAGE = "24.04"
+
+
+class EphemeralVM:
+    def __init__(self, image: str = DEFAULT_IMAGE, launch_timeout: float = 120.0):
+        self.image = image
+        self.launch_timeout = launch_timeout
+        self.name = f"repocheck-{uuid.uuid4().hex[:12]}"
+
+    def __enter__(self) -> "EphemeralVM":
+        if not check_multipass_available():
+            raise MultipassNotAvailable(
+                "multipass CLI not found or not working; install it to run "
+                "the dynamic analysis stage"
+            )
+        result = subprocess.run(
+            [
+                "multipass", "launch", self.image, "--name", self.name,
+                "--timeout", str(int(self.launch_timeout)),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=self.launch_timeout + 30,
+        )
+        if result.returncode != 0:
+            raise VMLaunchError(
+                f"failed to launch multipass VM '{self.name}': {result.stderr.strip()}"
+            )
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        delete_result = subprocess.run(
+            ["multipass", "delete", self.name, "--purge"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if delete_result.returncode != 0:
+            retry_result = subprocess.run(
+                ["multipass", "delete", self.name, "--purge"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if retry_result.returncode != 0:
+                message = (
+                    f"failed to destroy VM '{self.name}' after retry; "
+                    f"check manually with 'multipass list': {retry_result.stderr.strip()}"
+                )
+                if exc_type is None:
+                    raise VMCleanupError(message)
+                warnings.warn(message, RuntimeWarning, stacklevel=2)
+        return False

@@ -40,3 +40,126 @@ def test_returns_false_when_version_check_raises_os_error():
     with patch("repocheck.vm.shutil.which", return_value="/usr/local/bin/multipass"):
         with patch("repocheck.vm.subprocess.run", side_effect=OSError("boom")):
             assert check_multipass_available() is False
+
+
+import warnings
+
+import pytest
+
+from repocheck.vm import (
+    DEFAULT_IMAGE,
+    EphemeralVM,
+    MultipassNotAvailable,
+    VMCleanupError,
+    VMLaunchError,
+)
+
+
+def _mock_completed(returncode=0, stdout="", stderr=""):
+    result = subprocess.CompletedProcess(args=[], returncode=returncode)
+    result.stdout = stdout
+    result.stderr = stderr
+    return result
+
+
+def test_enter_raises_when_multipass_unavailable():
+    with patch("repocheck.vm.check_multipass_available", return_value=False):
+        with patch("repocheck.vm.subprocess.run") as mock_run:
+            with pytest.raises(MultipassNotAvailable):
+                with EphemeralVM():
+                    pass
+    mock_run.assert_not_called()
+
+
+def test_enter_launches_vm_with_correct_command():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        with patch(
+            "repocheck.vm.subprocess.run", return_value=_mock_completed(returncode=0)
+        ) as mock_run:
+            with EphemeralVM(image="24.04", launch_timeout=60.0) as vm:
+                launch_name = vm.name
+
+    launch_call = mock_run.call_args_list[0]
+    assert launch_call.args[0] == [
+        "multipass", "launch", "24.04", "--name", launch_name,
+        "--timeout", "60",
+    ]
+    assert launch_call.kwargs["timeout"] == 90.0
+
+
+def test_enter_raises_vm_launch_error_on_nonzero_exit():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        with patch(
+            "repocheck.vm.subprocess.run",
+            return_value=_mock_completed(returncode=1, stderr="no images available"),
+        ):
+            with pytest.raises(VMLaunchError, match="no images available"):
+                with EphemeralVM():
+                    pass
+
+
+def test_exit_always_calls_delete_with_purge():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        with patch(
+            "repocheck.vm.subprocess.run", return_value=_mock_completed(returncode=0)
+        ) as mock_run:
+            with EphemeralVM() as vm:
+                name = vm.name
+
+    delete_call = mock_run.call_args_list[-1]
+    assert delete_call.args[0] == ["multipass", "delete", name, "--purge"]
+
+
+def test_exit_destroys_vm_even_when_block_raises():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        with patch(
+            "repocheck.vm.subprocess.run", return_value=_mock_completed(returncode=0)
+        ) as mock_run:
+            with pytest.raises(RuntimeError, match="boom"):
+                with EphemeralVM() as vm:
+                    name = vm.name
+                    raise RuntimeError("boom")
+
+    delete_call = mock_run.call_args_list[-1]
+    assert delete_call.args[0] == ["multipass", "delete", name, "--purge"]
+
+
+def test_exit_retries_delete_once_on_failure():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),   # launch
+            _mock_completed(returncode=1, stderr="busy"),  # delete attempt 1
+            _mock_completed(returncode=0),   # delete attempt 2 (retry succeeds)
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses) as mock_run:
+            with EphemeralVM():
+                pass
+
+    assert mock_run.call_count == 3
+
+
+def test_exit_raises_cleanup_error_when_delete_fails_twice_and_no_other_exception():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),   # launch
+            _mock_completed(returncode=1, stderr="busy"),  # delete attempt 1
+            _mock_completed(returncode=1, stderr="still busy"),  # delete attempt 2
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses):
+            with pytest.raises(VMCleanupError, match="still busy"):
+                with EphemeralVM():
+                    pass
+
+
+def test_exit_warns_instead_of_masking_original_exception():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),   # launch
+            _mock_completed(returncode=1, stderr="busy"),  # delete attempt 1
+            _mock_completed(returncode=1, stderr="still busy"),  # delete attempt 2
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses):
+            with pytest.warns(RuntimeWarning, match="still busy"):
+                with pytest.raises(RuntimeError, match="original error"):
+                    with EphemeralVM():
+                        raise RuntimeError("original error")

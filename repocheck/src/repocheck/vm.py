@@ -125,12 +125,17 @@ class EphemeralVM:
         )
 
     def push_file(self, local_path: Path, remote_path: str) -> None:
-        result = subprocess.run(
-            ["multipass", "transfer", str(local_path), f"{self.name}:{remote_path}"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        try:
+            result = subprocess.run(
+                ["multipass", "transfer", str(local_path), f"{self.name}:{remote_path}"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise VMTransferError(
+                f"failed to push {local_path} to VM '{self.name}:{remote_path}': {exc}"
+            ) from exc
         if result.returncode != 0:
             raise VMTransferError(
                 f"failed to push {local_path} to VM '{self.name}:{remote_path}': "
@@ -138,12 +143,17 @@ class EphemeralVM:
             )
 
     def pull_file(self, remote_path: str, local_path: Path) -> None:
-        result = subprocess.run(
-            ["multipass", "transfer", f"{self.name}:{remote_path}", str(local_path)],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        try:
+            result = subprocess.run(
+                ["multipass", "transfer", f"{self.name}:{remote_path}", str(local_path)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise VMTransferError(
+                f"failed to pull VM '{self.name}:{remote_path}' to {local_path}: {exc}"
+            ) from exc
         if result.returncode != 0:
             raise VMTransferError(
                 f"failed to pull VM '{self.name}:{remote_path}' to {local_path}: "

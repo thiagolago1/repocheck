@@ -305,3 +305,29 @@ def test_pull_file_raises_vm_transfer_error_on_failure():
             with EphemeralVM() as vm:
                 with pytest.raises(VMTransferError, match="permission denied"):
                     vm.pull_file("/home/ubuntu/report.json", Path("/tmp/report.json"))
+
+
+def test_push_file_raises_vm_transfer_error_when_subprocess_times_out():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),  # launch
+            subprocess.TimeoutExpired(cmd="multipass transfer", timeout=60),  # transfer times out
+            _mock_completed(returncode=0),  # delete
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses):
+            with EphemeralVM() as vm:
+                with pytest.raises(VMTransferError):
+                    vm.push_file(Path("/tmp/analyze.py"), "/home/ubuntu/analyze.py")
+
+
+def test_pull_file_raises_vm_transfer_error_when_subprocess_raises_os_error():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),  # launch
+            OSError("multipass binary not found"),  # transfer raises OSError
+            _mock_completed(returncode=0),  # delete
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses):
+            with EphemeralVM() as vm:
+                with pytest.raises(VMTransferError):
+                    vm.pull_file("/home/ubuntu/report.json", Path("/tmp/report.json"))

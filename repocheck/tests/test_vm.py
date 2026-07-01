@@ -163,3 +163,41 @@ def test_exit_warns_instead_of_masking_original_exception():
                 with pytest.raises(RuntimeError, match="original error"):
                     with EphemeralVM():
                         raise RuntimeError("original error")
+
+
+def test_enter_raises_vm_launch_error_when_subprocess_times_out():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        with patch(
+            "repocheck.vm.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="multipass launch", timeout=150.0),
+        ):
+            with pytest.raises(VMLaunchError):
+                with EphemeralVM():
+                    pass
+
+
+def test_exit_retries_and_raises_cleanup_error_when_delete_raises_os_error_twice():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),   # launch
+            OSError("multipass daemon not responding"),  # delete attempt 1
+            OSError("multipass daemon not responding"),  # delete attempt 2
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses):
+            with pytest.raises(VMCleanupError, match="multipass daemon not responding"):
+                with EphemeralVM():
+                    pass
+
+
+def test_exit_warns_instead_of_raising_when_delete_raises_and_exception_already_propagating():
+    with patch("repocheck.vm.check_multipass_available", return_value=True):
+        responses = [
+            _mock_completed(returncode=0),   # launch
+            OSError("multipass daemon not responding"),  # delete attempt 1
+            OSError("multipass daemon not responding"),  # delete attempt 2
+        ]
+        with patch("repocheck.vm.subprocess.run", side_effect=responses):
+            with pytest.warns(RuntimeWarning):
+                with pytest.raises(RuntimeError, match="original error"):
+                    with EphemeralVM():
+                        raise RuntimeError("original error")

@@ -43,39 +43,48 @@ class EphemeralVM:
                 "multipass CLI not found or not working; install it to run "
                 "the dynamic analysis stage"
             )
-        result = subprocess.run(
-            [
-                "multipass", "launch", self.image, "--name", self.name,
-                "--timeout", str(int(self.launch_timeout)),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=self.launch_timeout + 30,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "multipass", "launch", self.image, "--name", self.name,
+                    "--timeout", str(int(self.launch_timeout)),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=self.launch_timeout + 30,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise VMLaunchError(
+                f"failed to launch multipass VM '{self.name}': {exc}"
+            ) from exc
         if result.returncode != 0:
             raise VMLaunchError(
                 f"failed to launch multipass VM '{self.name}': {result.stderr.strip()}"
             )
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> bool:
-        delete_result = subprocess.run(
-            ["multipass", "delete", self.name, "--purge"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if delete_result.returncode != 0:
-            retry_result = subprocess.run(
+    def _attempt_delete(self) -> tuple[bool, str]:
+        try:
+            result = subprocess.run(
                 ["multipass", "delete", self.name, "--purge"],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-            if retry_result.returncode != 0:
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return False, str(exc)
+        if result.returncode != 0:
+            return False, result.stderr.strip()
+        return True, ""
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        success, _ = self._attempt_delete()
+        if not success:
+            retry_success, retry_message = self._attempt_delete()
+            if not retry_success:
                 message = (
                     f"failed to destroy VM '{self.name}' after retry; "
-                    f"check manually with 'multipass list': {retry_result.stderr.strip()}"
+                    f"check manually with 'multipass list': {retry_message}"
                 )
                 if exc_type is None:
                     raise VMCleanupError(message)

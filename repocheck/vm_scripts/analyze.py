@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from pathlib import Path
 
 MALICIOUS_PATTERNS = [
@@ -47,4 +48,67 @@ def scan_malicious_patterns(repo_path: Path) -> list[dict]:
                             "snippet": line.strip()[:200],
                         }
                     )
+    return findings
+
+
+def scan_git_specifics(repo_path: Path) -> list[dict]:
+    findings = []
+
+    gitmodules = repo_path / ".gitmodules"
+    if gitmodules.is_file():
+        for line_number, line in enumerate(
+            gitmodules.read_text(errors="ignore").splitlines(), start=1
+        ):
+            if "ext::" in line:
+                findings.append(
+                    {
+                        "rule": "gitmodules_ext_transport",
+                        "file": ".gitmodules",
+                        "line": line_number,
+                        "snippet": line.strip()[:200],
+                    }
+                )
+
+    gitattributes = repo_path / ".gitattributes"
+    if gitattributes.is_file():
+        for line_number, line in enumerate(
+            gitattributes.read_text(errors="ignore").splitlines(), start=1
+        ):
+            if "filter=" in line:
+                findings.append(
+                    {
+                        "rule": "gitattributes_custom_filter",
+                        "file": ".gitattributes",
+                        "line": line_number,
+                        "snippet": line.strip()[:200],
+                    }
+                )
+
+    root_git_path = repo_path / ".git"
+    for path in sorted(repo_path.rglob(".git")):
+        if path == root_git_path:
+            continue
+        findings.append(
+            {
+                "rule": "nested_git_path",
+                "file": str(path.relative_to(repo_path)),
+                "line": 0,
+                "snippet": "",
+            }
+        )
+
+    for path in sorted(repo_path.rglob("*")):
+        relative_path = path.relative_to(repo_path)
+        if ".git" in relative_path.parts:
+            continue
+        if any(unicodedata.category(ch) == "Cf" for ch in path.name):
+            findings.append(
+                {
+                    "rule": "suspicious_filename_characters",
+                    "file": str(relative_path),
+                    "line": 0,
+                    "snippet": "",
+                }
+            )
+
     return findings

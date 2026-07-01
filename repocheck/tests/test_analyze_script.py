@@ -91,3 +91,60 @@ def test_scan_malicious_patterns_ignores_dot_git_directory(tmp_path):
     findings = analyze.scan_malicious_patterns(repo_dir)
 
     assert findings == []
+
+
+def test_scan_git_specifics_finds_gitmodules_ext_transport(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / ".gitmodules").write_text(
+        '[submodule "evil"]\n'
+        "\tpath = evil\n"
+        "\turl = ext::sh -c 'touch /tmp/pwned'\n"
+    )
+
+    findings = analyze.scan_git_specifics(repo_dir)
+
+    rules = [f["rule"] for f in findings]
+    assert "gitmodules_ext_transport" in rules
+
+
+def test_scan_git_specifics_finds_gitattributes_custom_filter(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / ".gitattributes").write_text("*.secret filter=my-custom-filter\n")
+
+    findings = analyze.scan_git_specifics(repo_dir)
+
+    rules = [f["rule"] for f in findings]
+    assert "gitattributes_custom_filter" in rules
+
+
+def test_scan_git_specifics_finds_nested_git_path(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    nested = repo_dir / "vendor" / ".git"
+    nested.mkdir(parents=True)
+
+    findings = analyze.scan_git_specifics(repo_dir)
+
+    rules = [f["rule"] for f in findings]
+    assert "nested_git_path" in rules
+    nested_finding = next(f for f in findings if f["rule"] == "nested_git_path")
+    assert nested_finding["file"] == "vendor/.git"
+
+
+def test_scan_git_specifics_finds_suspicious_filename_characters(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    suspicious_name = "invoice‮gpj.exe"
+    (repo_dir / suspicious_name).write_text("not actually an image")
+
+    findings = analyze.scan_git_specifics(repo_dir)
+
+    rules = [f["rule"] for f in findings]
+    assert "suspicious_filename_characters" in rules
+
+
+def test_scan_git_specifics_clean_repo_has_no_findings(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "README.md").write_text("# hello\n")
+
+    findings = analyze.scan_git_specifics(repo_dir)
+
+    assert findings == []

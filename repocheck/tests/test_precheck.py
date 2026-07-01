@@ -82,10 +82,11 @@ def test_precheck_flags_typosquat_candidate():
     assert result.typosquat_match == "react"
 
 
-def test_extract_repo_name_ignores_gitlab_tree_suffix():
-    """A GitLab-style '/-/tree/<branch>' suffix must not be mistaken for the
-    repo name -- the repo name is the second path segment (owner/repo),
-    not whatever trailing segment happens to be last in the URL."""
+def test_extract_repo_name_skips_gitlab_tree_suffix_url():
+    """A GitLab-style '/-/tree/<branch>' suffix produces a path with more
+    than two segments, which is no longer guessed at -- only the
+    unambiguous bare 'owner/repo' shape is handled, so this returns None
+    rather than risking a wrong guess."""
     location = RepoLocation(
         platform="unknown",
         owner=None,
@@ -93,7 +94,7 @@ def test_extract_repo_name_ignores_gitlab_tree_suffix():
         url="https://git.example.com/team/project/-/tree/main",
     )
 
-    assert _extract_repo_name(location) == "project"
+    assert _extract_repo_name(location) is None
 
 
 def test_extract_repo_name_strips_query_string():
@@ -110,10 +111,11 @@ def test_extract_repo_name_strips_query_string():
     assert _extract_repo_name(location) == "project"
 
 
-def test_extract_repo_name_handles_nested_gitlab_subgroup():
-    """Nested GitLab groups/subgroups (owner/subgroup/repo) must resolve to
-    the actual repo name (last segment), not the subgroup segment that a
-    naive 'second segment' approach would pick."""
+def test_extract_repo_name_skips_nested_subgroup_url():
+    """Nested GitLab groups/subgroups (owner/subgroup/repo) produce a path
+    with three segments. Since that shape is ambiguous (the middle segment
+    could be a subgroup or the repo could be elsewhere), the conservative
+    rule skips it and returns None rather than guessing."""
     location = RepoLocation(
         platform="unknown",
         owner=None,
@@ -121,7 +123,40 @@ def test_extract_repo_name_handles_nested_gitlab_subgroup():
         url="https://git.example.com/group/subgroup/project",
     )
 
-    assert _extract_repo_name(location) == "project"
+    assert _extract_repo_name(location) is None
+
+
+def test_extract_repo_name_returns_none_for_ambiguous_multi_segment_path():
+    """A four-segment path like 'owner/group/repo/issues' is exactly the
+    ambiguity that motivated dropping the marker-based algorithm: 'issues'
+    could be a route suffix or (in principle) a literal path segment, and
+    there's no way to tell without host-specific routing knowledge. The
+    conservative rule never guesses on non-2-segment paths, so this must
+    return None (previously the marker algorithm silently guessed 'repo',
+    which happened to be right here only by luck of convention)."""
+    location = RepoLocation(
+        platform="unknown",
+        owner=None,
+        repo=None,
+        url="https://git.example.com/owner/group/repo/issues",
+    )
+
+    assert _extract_repo_name(location) is None
+
+
+def test_extract_repo_name_handles_two_segment_marker_word_collision():
+    """A repo name that happens to collide with a word the old marker-based
+    algorithm treated specially (e.g. 'wiki') must still resolve correctly
+    when the path is the unambiguous two-segment 'owner/repo' shape -- no
+    special-casing of marker words is needed anymore."""
+    location = RepoLocation(
+        platform="unknown",
+        owner=None,
+        repo=None,
+        url="https://git.example.com/octocat/wiki",
+    )
+
+    assert _extract_repo_name(location) == "wiki"
 
 
 @responses.activate

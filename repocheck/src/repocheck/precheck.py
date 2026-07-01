@@ -25,8 +25,13 @@ class PrecheckResult:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
-def _age_in_days(created_at_iso: str) -> int:
-    created = datetime.fromisoformat(created_at_iso.replace("Z", "+00:00"))
+def _age_in_days(created_at_iso: str | None) -> int | None:
+    if created_at_iso is None:
+        return None
+    try:
+        created = datetime.fromisoformat(created_at_iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
     now = datetime.now(timezone.utc)
     return (now - created).days
 
@@ -88,10 +93,10 @@ def run_precheck(url: str) -> PrecheckResult:
         return PrecheckResult(
             location=location,
             reachable=True,
-            age_days=_age_in_days(raw["created_at"]),
+            age_days=_age_in_days(raw.get("created_at")),
             stars=raw.get("stargazers_count"),
             forks=raw.get("forks_count"),
-            owner_type=raw.get("owner", {}).get("type"),
+            owner_type=(raw.get("owner") or {}).get("type"),
             possible_typosquat=typosquat_match is not None,
             typosquat_match=typosquat_match,
             raw=raw,
@@ -111,7 +116,7 @@ def run_precheck(url: str) -> PrecheckResult:
         return PrecheckResult(
             location=location,
             reachable=True,
-            age_days=_age_in_days(raw["created_at"]),
+            age_days=_age_in_days(raw.get("created_at")),
             stars=raw.get("star_count"),
             forks=raw.get("forks_count"),
             owner_type=raw.get("namespace", {}).get("kind"),

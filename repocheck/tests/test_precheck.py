@@ -160,6 +160,74 @@ def test_extract_repo_name_handles_two_segment_marker_word_collision():
 
 
 @responses.activate
+def test_precheck_github_missing_created_at_degrades_gracefully():
+    """A 200 response missing 'created_at' entirely must not crash
+    run_precheck -- the repo is reachable and most metadata is present,
+    only the age signal is unavailable, so age_days should be None."""
+    responses.add(
+        responses.GET,
+        "https://api.github.com/repos/anthropics/claude-code",
+        json={
+            "stargazers_count": 500,
+            "forks_count": 20,
+            "owner": {"type": "Organization"},
+        },
+        status=200,
+    )
+
+    result = run_precheck("https://github.com/anthropics/claude-code")
+
+    assert result.reachable is True
+    assert result.age_days is None
+
+
+@responses.activate
+def test_precheck_github_invalid_created_at_degrades_gracefully():
+    """A 200 response with a non-ISO 'created_at' string must not crash
+    run_precheck -- it should degrade to age_days=None instead of letting
+    datetime.fromisoformat's ValueError propagate."""
+    responses.add(
+        responses.GET,
+        "https://api.github.com/repos/anthropics/claude-code",
+        json={
+            "created_at": "not-a-date",
+            "stargazers_count": 500,
+            "forks_count": 20,
+            "owner": {"type": "Organization"},
+        },
+        status=200,
+    )
+
+    result = run_precheck("https://github.com/anthropics/claude-code")
+
+    assert result.reachable is True
+    assert result.age_days is None
+
+
+@responses.activate
+def test_precheck_github_null_owner_does_not_raise():
+    """A 200 response with 'owner': null must not raise AttributeError --
+    raw.get("owner", {}) returns None (not the default) when the key is
+    present with a null value, so owner_type should gracefully be None."""
+    responses.add(
+        responses.GET,
+        "https://api.github.com/repos/anthropics/claude-code",
+        json={
+            "created_at": "2020-01-01T00:00:00Z",
+            "stargazers_count": 500,
+            "forks_count": 20,
+            "owner": None,
+        },
+        status=200,
+    )
+
+    result = run_precheck("https://github.com/anthropics/claude-code")
+
+    assert result.reachable is True
+    assert result.owner_type is None
+
+
+@responses.activate
 def test_precheck_github_server_error_marks_unreachable_instead_of_raising():
     """A 500 from the GitHub API raises requests.exceptions.HTTPError inside
     github_client.fetch_repo_metadata (not GitHubClientError, which is only

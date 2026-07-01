@@ -15,6 +15,7 @@ repocheck = "repocheck.cli:main"
 dev = [
     "pytest>=8.0",
     "responses>=0.25",
+    "detect-secrets>=1.5",
 ]
 
 [build-system]

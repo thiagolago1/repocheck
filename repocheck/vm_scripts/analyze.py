@@ -1,4 +1,6 @@
+import json
 import re
+import subprocess
 import unicodedata
 from pathlib import Path
 
@@ -111,4 +113,48 @@ def scan_git_specifics(repo_path: Path) -> list[dict]:
                 }
             )
 
+    return findings
+
+
+def scan_secrets(repo_path: Path) -> list[dict]:
+    try:
+        result = subprocess.run(
+            ["detect-secrets", "scan", "--all-files", "."],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=str(repo_path),
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return [
+            {
+                "rule": "scanner_not_executed",
+                "file": "",
+                "line": 0,
+                "snippet": f"detect-secrets unavailable: {exc}",
+            }
+        ]
+
+    if result.returncode != 0:
+        return [
+            {
+                "rule": "scanner_not_executed",
+                "file": "",
+                "line": 0,
+                "snippet": f"detect-secrets failed: {result.stderr.strip()}",
+            }
+        ]
+
+    payload = json.loads(result.stdout)
+    findings = []
+    for file_path, file_findings in payload.get("results", {}).items():
+        for finding in file_findings:
+            findings.append(
+                {
+                    "rule": f"secret_{finding['type'].lower().replace(' ', '_')}",
+                    "file": file_path,
+                    "line": finding["line_number"],
+                    "snippet": "",
+                }
+            )
     return findings

@@ -1,6 +1,7 @@
 import importlib.util
 import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 _SCRIPT_PATH = Path(__file__).resolve().parent.parent / "vm_scripts" / "analyze.py"
 
@@ -148,3 +149,39 @@ def test_scan_git_specifics_clean_repo_has_no_findings(tmp_path):
     findings = analyze.scan_git_specifics(repo_dir)
 
     assert findings == []
+
+
+def test_scan_secrets_finds_aws_key(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "config.py").write_text(
+        "AWS_KEY = 'AKIAIOSFODNN7EXAMPLE'\n"
+    )
+
+    findings = analyze.scan_secrets(repo_dir)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"].startswith("secret_")
+    assert findings[0]["file"] == "config.py"
+    assert findings[0]["line"] == 1
+    assert findings[0]["snippet"] == ""
+
+
+def test_scan_secrets_clean_repo_has_no_findings(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "README.md").write_text("# hello\n")
+
+    findings = analyze.scan_secrets(repo_dir)
+
+    assert findings == []
+
+
+def test_scan_secrets_marks_not_executed_when_tool_missing(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+
+    with patch.object(
+        analyze.subprocess, "run", side_effect=FileNotFoundError("no such file")
+    ):
+        findings = analyze.scan_secrets(repo_dir)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"] == "scanner_not_executed"

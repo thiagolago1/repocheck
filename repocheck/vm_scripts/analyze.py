@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 import subprocess
 import sys
 import unicodedata
@@ -117,11 +118,21 @@ def scan_git_specifics(repo_path: Path) -> list[dict]:
     return findings
 
 
+def _resolve_detect_secrets_command() -> str:
+    found = shutil.which("detect-secrets")
+    if found:
+        return found
+    candidate = Path(sys.executable).parent / "detect-secrets"
+    if candidate.is_file():
+        return str(candidate)
+    return "detect-secrets"
+
+
 def scan_secrets(repo_path: Path) -> list[dict]:
     try:
         result = subprocess.run(
             [
-                "detect-secrets",
+                _resolve_detect_secrets_command(),
                 "scan",
                 "--all-files",
                 "--exclude-files",

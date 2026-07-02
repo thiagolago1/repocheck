@@ -216,6 +216,60 @@ def detect_build_command(repo_path: Path) -> list[str] | None:
     return None
 
 
+def run_dynamic_step(repo_path: Path, timeout: float = 120.0) -> dict:
+    command = detect_build_command(repo_path)
+    if command is None:
+        return {
+            "attempted": False,
+            "command": None,
+            "exit_code": None,
+            "timed_out": False,
+            "network_connect_attempts": [],
+        }
+
+    network_result = cut_network()
+
+    telemetry_path = repo_path.parent / "telemetry.log"
+    wrapped_command = [
+        "strace",
+        "-f",
+        "-e",
+        "trace=connect",
+        "-o",
+        str(telemetry_path),
+        *command,
+    ]
+
+    try:
+        result = subprocess.run(
+            wrapped_command,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        exit_code = result.returncode
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        exit_code = None
+        timed_out = True
+
+    connect_attempts = []
+    if telemetry_path.is_file():
+        for line in telemetry_path.read_text(errors="ignore").splitlines():
+            if "connect(" in line:
+                connect_attempts.append(line.strip()[:200])
+
+    return {
+        "attempted": True,
+        "command": command,
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "network_cutoff_applied": network_result["applied"],
+        "network_connect_attempts": connect_attempts,
+    }
+
+
 def main() -> None:
     run(Path(sys.argv[1]), Path(sys.argv[2]))
 

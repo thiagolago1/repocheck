@@ -297,3 +297,79 @@ def test_detect_build_command_returns_none_for_unrecognized_repo(tmp_path):
     command = analyze.detect_build_command(repo_dir)
 
     assert command is None
+
+
+import subprocess as subprocess_module
+from unittest.mock import MagicMock
+
+
+def test_run_dynamic_step_skips_when_no_build_command_detected(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "README.md").write_text("# hello\n")
+
+    result = analyze.run_dynamic_step(repo_dir)
+
+    assert result == {
+        "attempted": False,
+        "command": None,
+        "exit_code": None,
+        "timed_out": False,
+        "network_connect_attempts": [],
+    }
+
+
+def test_run_dynamic_step_runs_detected_command_and_parses_telemetry(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "requirements.txt").write_text("requests==2.31.0\n")
+    telemetry_path = repo_dir.parent / "telemetry.log"
+    telemetry_path.write_text(
+        "connect(3, {sa_family=AF_INET, sin_port=htons(443), "
+        'sin_addr=inet_addr("93.184.216.34")}, 16) = -1 ECONNREFUSED\n'
+        "openat(AT_FDCWD, \"/etc/passwd\", O_RDONLY) = 3\n"
+    )
+
+    with patch.object(analyze.subprocess, "run") as mock_run:
+
+        def run_side_effect(command, **kwargs):
+            result = MagicMock()
+            if command[:2] == ["sudo", "bash"]:
+                result.returncode = 0
+                result.stderr = ""
+            else:
+                result.returncode = 0
+            return result
+
+        mock_run.side_effect = run_side_effect
+
+        result = analyze.run_dynamic_step(repo_dir, timeout=60.0)
+
+    assert result["attempted"] is True
+    assert result["command"] == ["pip3", "install", "-r", "requirements.txt"]
+    assert result["exit_code"] == 0
+    assert result["timed_out"] is False
+    assert result["network_cutoff_applied"] is True
+    assert len(result["network_connect_attempts"]) == 1
+    assert "connect(" in result["network_connect_attempts"][0]
+
+
+def test_run_dynamic_step_marks_timed_out_on_timeout(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "package.json").write_text('{"name": "example"}')
+
+    with patch.object(analyze.subprocess, "run") as mock_run:
+
+        def run_side_effect(command, **kwargs):
+            if command[:2] == ["sudo", "bash"]:
+                result = MagicMock()
+                result.returncode = 0
+                result.stderr = ""
+                return result
+            raise subprocess_module.TimeoutExpired(cmd=command, timeout=60.0)
+
+        mock_run.side_effect = run_side_effect
+
+        result = analyze.run_dynamic_step(repo_dir, timeout=60.0)
+
+    assert result["attempted"] is True
+    assert result["timed_out"] is True
+    assert result["exit_code"] is None

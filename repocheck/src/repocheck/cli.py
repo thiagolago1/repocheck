@@ -3,7 +3,11 @@ from dataclasses import asdict
 
 import click
 
+from repocheck.analysis import run_analysis
 from repocheck.precheck import run_precheck
+from repocheck.report import render_report
+from repocheck.verdict import compute_verdict
+from repocheck.vm import MultipassNotAvailable
 
 
 @click.command()
@@ -12,31 +16,36 @@ from repocheck.precheck import run_precheck
     "--json",
     "as_json",
     is_flag=True,
-    help="Output raw JSON instead of a human-readable summary.",
+    help="Output raw JSON instead of a human-readable report.",
 )
 def main(url: str, as_json: bool) -> None:
-    result = run_precheck(url)
+    precheck = run_precheck(url)
+
+    analysis = None
+    multipass_warning = None
+    try:
+        analysis = run_analysis(url)
+    except MultipassNotAvailable as exc:
+        multipass_warning = str(exc)
+
+    verdict_result = compute_verdict(precheck, analysis)
 
     if as_json:
-        click.echo(json.dumps(asdict(result), indent=2, default=str))
+        payload = {
+            "verdict": verdict_result.verdict.value,
+            "reasons": verdict_result.reasons,
+            "precheck": asdict(precheck),
+            "analysis": asdict(analysis) if analysis is not None else None,
+            "multipass_warning": multipass_warning,
+        }
+        click.echo(json.dumps(payload, indent=2, default=str))
         return
 
-    click.echo(f"Platform: {result.location.platform}")
-    click.echo(f"Owner/repo: {result.location.owner}/{result.location.repo}")
+    if multipass_warning is not None:
+        click.echo(f"AVISO: {multipass_warning}")
+        click.echo("")
 
-    if not result.reachable:
-        click.echo(f"Reachable: no ({result.error})")
-    else:
-        click.echo("Reachable: yes")
-        click.echo(f"Age (days): {result.age_days}")
-        click.echo(f"Stars: {result.stars}")
-        click.echo(f"Forks: {result.forks}")
-        click.echo(f"Owner type: {result.owner_type}")
-
-    if result.possible_typosquat:
-        click.echo(
-            f"WARNING: name is suspiciously close to popular repo '{result.typosquat_match}'"
-        )
+    click.echo(render_report(precheck, analysis, verdict_result))
 
 
 if __name__ == "__main__":

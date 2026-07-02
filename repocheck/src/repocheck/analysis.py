@@ -1,0 +1,79 @@
+import json
+import tempfile
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from repocheck.vm import EphemeralVM
+
+_VM_SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "vm_scripts"
+_ANALYZE_SCRIPT = _VM_SCRIPTS_DIR / "analyze.py"
+
+_REMOTE_REPO_PATH = "/home/ubuntu/repo"
+_REMOTE_SCRIPT_PATH = "/home/ubuntu/analyze.py"
+_REMOTE_REPORT_PATH = "/home/ubuntu/report.json"
+
+_BOOTSTRAP_COMMAND = [
+    "bash",
+    "-c",
+    "sudo apt-get update -qq && "
+    "sudo apt-get install -y -qq git python3-pip && "
+    "pip3 install --quiet detect-secrets",
+]
+
+
+@dataclass
+class StaticAnalysisReport:
+    clone_succeeded: bool
+    malicious_patterns: list[dict[str, Any]] = field(default_factory=list)
+    git_findings: list[dict[str, Any]] = field(default_factory=list)
+    secrets: list[dict[str, Any]] = field(default_factory=list)
+    error: str | None = None
+
+
+def _local_temp_report_path() -> Path:
+    return Path(tempfile.gettempdir()) / f"repocheck-report-{uuid.uuid4().hex}.json"
+
+
+def run_static_analysis(url: str, timeout: float = 300.0) -> StaticAnalysisReport:
+    with EphemeralVM(launch_timeout=180.0) as vm:
+        bootstrap_result = vm.run(_BOOTSTRAP_COMMAND, timeout=180.0)
+        if bootstrap_result.returncode != 0:
+            return StaticAnalysisReport(
+                clone_succeeded=False,
+                error=f"bootstrap failed: {bootstrap_result.stderr.strip()}",
+            )
+
+        clone_result = vm.run(
+            ["git", "clone", "--", url, _REMOTE_REPO_PATH], timeout=timeout
+        )
+        if clone_result.returncode != 0:
+            return StaticAnalysisReport(
+                clone_succeeded=False,
+                error=f"clone failed: {clone_result.stderr.strip()}",
+            )
+
+        vm.push_file(_ANALYZE_SCRIPT, _REMOTE_SCRIPT_PATH)
+
+        analyze_result = vm.run(
+            ["python3", _REMOTE_SCRIPT_PATH, _REMOTE_REPO_PATH, _REMOTE_REPORT_PATH],
+            timeout=timeout,
+        )
+        if analyze_result.returncode != 0:
+            return StaticAnalysisReport(
+                clone_succeeded=True,
+                error=f"analysis script failed: {analyze_result.stderr.strip()}",
+            )
+
+        local_report_path = _local_temp_report_path()
+        vm.pull_file(_REMOTE_REPORT_PATH, local_report_path)
+        payload = json.loads(local_report_path.read_text())
+        local_report_path.unlink(missing_ok=True)
+
+    return StaticAnalysisReport(
+        clone_succeeded=True,
+        malicious_patterns=payload.get("malicious_patterns", []),
+        git_findings=payload.get("git_findings", []),
+        secrets=payload.get("secrets", []),
+    )

@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import sys
 import unicodedata
 from pathlib import Path
 
@@ -165,3 +166,20 @@ def scan_secrets(repo_path: Path) -> list[dict]:
                 }
             )
     return findings
+
+
+def run(repo_path: Path, output_path: Path) -> None:
+    report = {
+        "malicious_patterns": scan_malicious_patterns(repo_path),
+        "git_findings": scan_git_specifics(repo_path),
+        "secrets": scan_secrets(repo_path),
+    }
+    output_path.write_text(json.dumps(report, indent=2))
+
+
+def main() -> None:
+    run(Path(sys.argv[1]), Path(sys.argv[2]))
+
+
+if __name__ == "__main__":
+    main()

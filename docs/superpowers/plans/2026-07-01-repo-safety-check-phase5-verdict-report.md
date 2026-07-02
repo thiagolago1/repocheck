@@ -14,6 +14,7 @@
 - Ausência de análise (Multipass indisponível, `analysis is None`) nunca resulta em veredito SEGURO — sempre SUSPEITO, com aviso explícito ao usuário.
 - MALICIOSO tem prioridade sobre SUSPEITO: se qualquer achado malicioso existir, o veredito é MALICIOSO mesmo que também existam sinais apenas suspeitos — nunca "dilui" um achado grave por causa de sinais mistos.
 - O relatório sempre lista os motivos por trás do veredito — nunca um veredito sem justificativa (`reasons` nunca vazio).
+- Se a etapa dinâmica rodou (`dynamic_attempted=True`) mas o corte de rede não foi confirmado (`network_cutoff_applied is False`), isso é pelo menos SUSPEITO — o build/install pode ter rodado com acesso à rede, o que enfraquece qualquer achado "limpo" da etapa dinâmica (sugestão incorporada da revisão final da Fase 4).
 
 ---
 
@@ -145,6 +146,21 @@ def test_dynamic_timeout_is_suspicious():
     assert result.verdict == Verdict.SUSPICIOUS
 
 
+def test_dynamic_step_without_confirmed_network_cutoff_is_suspicious():
+    analysis = _make_analysis(
+        dynamic_attempted=True, network_cutoff_applied=False
+    )
+    result = compute_verdict(_make_precheck(), analysis)
+    assert result.verdict == Verdict.SUSPICIOUS
+    assert any("corte de rede" in reason for reason in result.reasons)
+
+
+def test_dynamic_not_attempted_with_no_cutoff_info_is_safe():
+    analysis = _make_analysis(dynamic_attempted=False, network_cutoff_applied=None)
+    result = compute_verdict(_make_precheck(), analysis)
+    assert result.verdict == Verdict.SAFE
+
+
 def test_scanner_not_executed_is_suspicious_not_safe():
     analysis = _make_analysis(
         secrets=[
@@ -270,6 +286,12 @@ def compute_verdict(
     if analysis.dynamic_timed_out:
         suspicious_reasons.append("etapa dinâmica não terminou dentro do timeout")
 
+    if analysis.dynamic_attempted and analysis.network_cutoff_applied is False:
+        suspicious_reasons.append(
+            "a etapa dinâmica rodou sem corte de rede confirmado (iptables falhou "
+            "dentro da VM) — o build/install pode ter tido acesso à rede"
+        )
+
     if precheck.possible_typosquat:
         suspicious_reasons.append(
             f"nome suspeito de typosquatting (parecido com '{precheck.typosquat_match}')"
@@ -302,7 +324,7 @@ def compute_verdict(
 cd repocheck && .venv/bin/pytest tests/test_verdict.py -v
 ```
 
-Expected: 13 passed.
+Expected: 15 passed.
 
 - [ ] **Step 5: Commit**
 

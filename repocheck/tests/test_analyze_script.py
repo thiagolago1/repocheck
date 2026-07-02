@@ -236,3 +236,28 @@ def test_run_writes_combined_json_report(tmp_path):
     assert len(payload["malicious_patterns"]) == 1
     assert payload["malicious_patterns"][0]["rule"] == "curl_pipe_shell"
     assert payload["git_findings"] == []
+
+
+def test_cut_network_applies_iptables_rules_successfully():
+    with patch.object(analyze.subprocess, "run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        result = analyze.cut_network()
+
+    assert result == {"applied": True, "error": ""}
+    call_args = mock_run.call_args
+    command = call_args.args[0]
+    assert command[0] == "sudo"
+    assert "iptables" in " ".join(command)
+
+
+def test_cut_network_reports_failure_when_iptables_fails():
+    with patch.object(analyze.subprocess, "run") as mock_run:
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "iptables: command not found"
+
+        result = analyze.cut_network()
+
+    assert result["applied"] is False
+    assert "command not found" in result["error"]

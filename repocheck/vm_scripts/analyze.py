@@ -188,6 +188,24 @@ def run(repo_path: Path, output_path: Path) -> None:
     output_path.write_text(json.dumps(report, indent=2))
 
 
+def cut_network() -> dict:
+    result = subprocess.run(
+        [
+            "sudo",
+            "bash",
+            "-c",
+            "iptables -P OUTPUT DROP && iptables -A OUTPUT -o lo -j ACCEPT",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return {
+        "applied": result.returncode == 0,
+        "error": "" if result.returncode == 0 else result.stderr.strip(),
+    }
+
+
 def main() -> None:
     run(Path(sys.argv[1]), Path(sys.argv[2]))
 

@@ -206,6 +206,16 @@ def cut_network() -> dict:
     }
 
 
+def detect_build_command(repo_path: Path) -> list[str] | None:
+    if (repo_path / "package.json").is_file():
+        return ["npm", "install"]
+    if (repo_path / "requirements.txt").is_file():
+        return ["pip3", "install", "-r", "requirements.txt"]
+    if (repo_path / "setup.py").is_file():
+        return ["pip3", "install", "."]
+    return None
+
+
 def main() -> None:
     run(Path(sys.argv[1]), Path(sys.argv[2]))
 

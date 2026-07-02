@@ -261,3 +261,39 @@ def test_cut_network_reports_failure_when_iptables_fails():
 
     assert result["applied"] is False
     assert "command not found" in result["error"]
+
+
+def test_detect_build_command_finds_npm_for_package_json(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "package.json").write_text('{"name": "example"}')
+
+    command = analyze.detect_build_command(repo_dir)
+
+    assert command == ["npm", "install"]
+
+
+def test_detect_build_command_finds_pip_for_requirements_txt(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "requirements.txt").write_text("requests==2.31.0\n")
+
+    command = analyze.detect_build_command(repo_dir)
+
+    assert command == ["pip3", "install", "-r", "requirements.txt"]
+
+
+def test_detect_build_command_finds_pip_for_setup_py(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "setup.py").write_text("from setuptools import setup\nsetup()\n")
+
+    command = analyze.detect_build_command(repo_dir)
+
+    assert command == ["pip3", "install", "."]
+
+
+def test_detect_build_command_returns_none_for_unrecognized_repo(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "README.md").write_text("# hello\n")
+
+    command = analyze.detect_build_command(repo_dir)
+
+    assert command is None

@@ -119,7 +119,14 @@ def scan_git_specifics(repo_path: Path) -> list[dict]:
 def scan_secrets(repo_path: Path) -> list[dict]:
     try:
         result = subprocess.run(
-            ["detect-secrets", "scan", "--all-files", "."],
+            [
+                "detect-secrets",
+                "scan",
+                "--all-files",
+                "--exclude-files",
+                r"(^|/)\.git/",
+                ".",
+            ],
             capture_output=True,
             text=True,
             timeout=120,

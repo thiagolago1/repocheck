@@ -175,6 +175,18 @@ def test_scan_secrets_clean_repo_has_no_findings(tmp_path):
     assert findings == []
 
 
+def test_scan_secrets_ignores_dot_git_directory(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "README.md").write_text("# hello\n")
+    (repo_dir / ".git" / "COMMIT_EDITMSG").write_text(
+        "Add config\n\nAWS_KEY = 'AKIAIOSFODNN7EXAMPLE'\n"
+    )
+
+    findings = analyze.scan_secrets(repo_dir)
+
+    assert findings == []
+
+
 def test_scan_secrets_marks_not_executed_when_tool_missing(tmp_path):
     repo_dir = _init_repo(tmp_path)
 

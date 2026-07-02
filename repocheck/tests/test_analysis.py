@@ -37,7 +37,7 @@ def _make_mock_vm(bootstrap_rc=0, clone_rc=0, analyze_rc=0, report_payload=None)
 
 
 def test_run_static_analysis_happy_path():
-    from repocheck.analysis import run_static_analysis
+    from repocheck.analysis import run_analysis
 
     mock_vm = _make_mock_vm(
         report_payload={
@@ -54,7 +54,7 @@ def test_run_static_analysis_happy_path():
         }
     )
     with patch("repocheck.analysis.EphemeralVM", return_value=mock_vm):
-        report = run_static_analysis("https://github.com/example/repo")
+        report = run_analysis("https://github.com/example/repo")
 
     assert report.clone_succeeded is True
     assert report.error is None
@@ -65,11 +65,11 @@ def test_run_static_analysis_happy_path():
 
 
 def test_run_static_analysis_bootstrap_failure():
-    from repocheck.analysis import run_static_analysis
+    from repocheck.analysis import run_analysis
 
     mock_vm = _make_mock_vm(bootstrap_rc=1)
     with patch("repocheck.analysis.EphemeralVM", return_value=mock_vm):
-        report = run_static_analysis("https://github.com/example/repo")
+        report = run_analysis("https://github.com/example/repo")
 
     assert report.clone_succeeded is False
     assert "bootstrap failed" in report.error
@@ -77,22 +77,22 @@ def test_run_static_analysis_bootstrap_failure():
 
 
 def test_run_static_analysis_clone_failure():
-    from repocheck.analysis import run_static_analysis
+    from repocheck.analysis import run_analysis
 
     mock_vm = _make_mock_vm(clone_rc=128)
     with patch("repocheck.analysis.EphemeralVM", return_value=mock_vm):
-        report = run_static_analysis("https://github.com/example/nonexistent")
+        report = run_analysis("https://github.com/example/nonexistent")
 
     assert report.clone_succeeded is False
     assert "clone failed" in report.error
 
 
 def test_run_static_analysis_script_failure():
-    from repocheck.analysis import run_static_analysis
+    from repocheck.analysis import run_analysis
 
     mock_vm = _make_mock_vm(analyze_rc=1)
     with patch("repocheck.analysis.EphemeralVM", return_value=mock_vm):
-        report = run_static_analysis("https://github.com/example/repo")
+        report = run_analysis("https://github.com/example/repo")
 
     assert report.clone_succeeded is True
     assert "analysis script failed" in report.error

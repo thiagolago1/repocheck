@@ -184,6 +184,7 @@ def run(repo_path: Path, output_path: Path) -> None:
         "malicious_patterns": scan_malicious_patterns(repo_path),
         "git_findings": scan_git_specifics(repo_path),
         "secrets": scan_secrets(repo_path),
+        "dynamic": run_dynamic_step(repo_path),
     }
     output_path.write_text(json.dumps(report, indent=2))
 

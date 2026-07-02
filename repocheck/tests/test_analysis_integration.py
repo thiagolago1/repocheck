@@ -1,6 +1,6 @@
 import pytest
 
-from repocheck.analysis import run_static_analysis
+from repocheck.analysis import run_analysis
 from repocheck.vm import check_multipass_available
 
 pytestmark = pytest.mark.skipif(
@@ -9,13 +9,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_static_analysis_full_pipeline_against_real_public_repo():
-    report = run_static_analysis(
-        "https://github.com/octocat/Hello-World", timeout=300.0
-    )
+def test_analysis_full_pipeline_against_real_public_repo():
+    report = run_analysis("https://github.com/octocat/Hello-World", timeout=300.0)
 
     assert report.clone_succeeded is True
     assert report.error is None
     assert isinstance(report.malicious_patterns, list)
     assert isinstance(report.git_findings, list)
     assert isinstance(report.secrets, list)
+    # octocat/Hello-World has no package.json/requirements.txt/setup.py,
+    # so the dynamic step must skip explicitly rather than guess a command.
+    assert report.dynamic_attempted is False
+    assert report.dynamic_command is None

@@ -18,17 +18,23 @@ _BOOTSTRAP_COMMAND = [
     "bash",
     "-c",
     "sudo apt-get update -qq && "
-    "sudo apt-get install -y -qq git python3-pip && "
+    "sudo apt-get install -y -qq git python3-pip nodejs npm strace && "
     "pip3 install --quiet detect-secrets",
 ]
 
 
 @dataclass
-class StaticAnalysisReport:
+class AnalysisReport:
     clone_succeeded: bool
     malicious_patterns: list[dict[str, Any]] = field(default_factory=list)
     git_findings: list[dict[str, Any]] = field(default_factory=list)
     secrets: list[dict[str, Any]] = field(default_factory=list)
+    dynamic_attempted: bool = False
+    dynamic_command: list[str] | None = None
+    dynamic_exit_code: int | None = None
+    dynamic_timed_out: bool = False
+    network_cutoff_applied: bool | None = None
+    network_connect_attempts: list[str] = field(default_factory=list)
     error: str | None = None
 
 
@@ -36,11 +42,11 @@ def _local_temp_report_path() -> Path:
     return Path(tempfile.gettempdir()) / f"repocheck-report-{uuid.uuid4().hex}.json"
 
 
-def run_static_analysis(url: str, timeout: float = 300.0) -> StaticAnalysisReport:
+def run_analysis(url: str, timeout: float = 300.0) -> AnalysisReport:
     with EphemeralVM(launch_timeout=180.0) as vm:
-        bootstrap_result = vm.run(_BOOTSTRAP_COMMAND, timeout=180.0)
+        bootstrap_result = vm.run(_BOOTSTRAP_COMMAND, timeout=240.0)
         if bootstrap_result.returncode != 0:
-            return StaticAnalysisReport(
+            return AnalysisReport(
                 clone_succeeded=False,
                 error=f"bootstrap failed: {bootstrap_result.stderr.strip()}",
             )
@@ -49,7 +55,7 @@ def run_static_analysis(url: str, timeout: float = 300.0) -> StaticAnalysisRepor
             ["git", "clone", "--", url, _REMOTE_REPO_PATH], timeout=timeout
         )
         if clone_result.returncode != 0:
-            return StaticAnalysisReport(
+            return AnalysisReport(
                 clone_succeeded=False,
                 error=f"clone failed: {clone_result.stderr.strip()}",
             )
@@ -61,7 +67,7 @@ def run_static_analysis(url: str, timeout: float = 300.0) -> StaticAnalysisRepor
             timeout=timeout,
         )
         if analyze_result.returncode != 0:
-            return StaticAnalysisReport(
+            return AnalysisReport(
                 clone_succeeded=True,
                 error=f"analysis script failed: {analyze_result.stderr.strip()}",
             )
@@ -71,9 +77,16 @@ def run_static_analysis(url: str, timeout: float = 300.0) -> StaticAnalysisRepor
         payload = json.loads(local_report_path.read_text())
         local_report_path.unlink(missing_ok=True)
 
-    return StaticAnalysisReport(
+    dynamic = payload.get("dynamic", {})
+    return AnalysisReport(
         clone_succeeded=True,
         malicious_patterns=payload.get("malicious_patterns", []),
         git_findings=payload.get("git_findings", []),
         secrets=payload.get("secrets", []),
+        dynamic_attempted=dynamic.get("attempted", False),
+        dynamic_command=dynamic.get("command"),
+        dynamic_exit_code=dynamic.get("exit_code"),
+        dynamic_timed_out=dynamic.get("timed_out", False),
+        network_cutoff_applied=dynamic.get("network_cutoff_applied"),
+        network_connect_attempts=dynamic.get("network_connect_attempts", []),
     )

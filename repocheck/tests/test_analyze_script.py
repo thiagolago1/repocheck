@@ -232,7 +232,12 @@ def test_run_writes_combined_json_report(tmp_path):
     analyze.run(repo_dir, output_path)
 
     payload = json_module.loads(output_path.read_text())
-    assert set(payload.keys()) == {"malicious_patterns", "git_findings", "secrets"}
+    assert set(payload.keys()) == {
+        "malicious_patterns",
+        "git_findings",
+        "secrets",
+        "dynamic",
+    }
     assert len(payload["malicious_patterns"]) == 1
     assert payload["malicious_patterns"][0]["rule"] == "curl_pipe_shell"
     assert payload["git_findings"] == []
@@ -373,3 +378,20 @@ def test_run_dynamic_step_marks_timed_out_on_timeout(tmp_path):
     assert result["attempted"] is True
     assert result["timed_out"] is True
     assert result["exit_code"] is None
+
+
+def test_run_includes_dynamic_step_in_combined_report(tmp_path):
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "README.md").write_text("# hello, no build system here\n")
+    output_path = tmp_path / "report.json"
+
+    analyze.run(repo_dir, output_path)
+
+    payload = json_module.loads(output_path.read_text())
+    assert set(payload.keys()) == {
+        "malicious_patterns",
+        "git_findings",
+        "secrets",
+        "dynamic",
+    }
+    assert payload["dynamic"]["attempted"] is False

@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from repocheck.vm import VMCleanupError, VMCommandTimeout, VMLaunchError, VMTransferError
+
 
 def _make_mock_vm(bootstrap_rc=0, clone_rc=0, analyze_rc=0, report_payload=None):
     vm = MagicMock()
@@ -96,3 +98,69 @@ def test_run_static_analysis_script_failure():
 
     assert report.clone_succeeded is True
     assert "analysis script failed" in report.error
+
+
+def test_run_analysis_degrades_gracefully_on_vm_launch_error():
+    from repocheck.analysis import run_analysis
+
+    mock_vm = MagicMock()
+    mock_vm.__enter__.side_effect = VMLaunchError("no images available")
+
+    with patch("repocheck.analysis.EphemeralVM", return_value=mock_vm):
+        report = run_analysis("https://github.com/example/repo")
+
+    assert report.clone_succeeded is False
+    assert "failed to launch" in report.error
+
+
+def test_run_analysis_degrades_gracefully_on_command_timeout():
+    """Regression test: a VMCommandTimeout (e.g. the analyze step or a real
+    npm install taking longer than the timeout) must never propagate as an
+    uncaught exception — it must degrade to a SUSPICIOUS-worthy report."""
+    from repocheck.analysis import run_analysis
+
+    def _success():
+        result = MagicMock()
+        result.returncode = 0
+        result.stderr = ""
+        return result
+
+    mock_vm = _make_mock_vm()
+    mock_vm.run.side_effect = [
+        _success(),  # bootstrap succeeds
+        _success(),  # clone succeeds
+        VMCommandTimeout("command timed out after 600.0s inside VM"),  # analyze step
+    ]
+
+    with patch("repocheck.analysis.EphemeralVM", return_value=mock_vm):
+        report = run_analysis("https://github.com/example/repo")
+
+    assert report.clone_succeeded is True
+    assert "did not finish within the" in report.error
+    assert "timeout" in report.error
+
+
+def test_run_analysis_degrades_gracefully_on_transfer_error():
+    from repocheck.analysis import run_analysis
+
+    mock_vm = _make_mock_vm()
+    mock_vm.push_file.side_effect = VMTransferError("failed to push analyze.py")
+
+    with patch("repocheck.analysis.EphemeralVM", return_value=mock_vm):
+        report = run_analysis("https://github.com/example/repo")
+
+    assert report.clone_succeeded is True
+    assert "failed to transfer files" in report.error
+
+
+def test_run_analysis_degrades_gracefully_on_cleanup_error():
+    from repocheck.analysis import run_analysis
+
+    mock_vm = _make_mock_vm()
+    mock_vm.__exit__.side_effect = VMCleanupError("failed to destroy VM after retry")
+
+    with patch("repocheck.analysis.EphemeralVM", return_value=mock_vm):
+        report = run_analysis("https://github.com/example/repo")
+
+    assert report.clone_succeeded is True
+    assert "failed to destroy the analysis VM" in report.error

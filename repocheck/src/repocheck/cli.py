@@ -1,4 +1,5 @@
 import json
+import sys
 from dataclasses import asdict
 
 import click
@@ -6,6 +7,7 @@ import click
 from repocheck.analysis import run_analysis
 from repocheck.precheck import run_precheck
 from repocheck.report import render_report
+from repocheck.spinner import Spinner
 from repocheck.verdict import compute_verdict
 from repocheck.vm import MultipassNotAvailable
 
@@ -19,17 +21,16 @@ from repocheck.vm import MultipassNotAvailable
     help="Output raw JSON instead of a human-readable report.",
 )
 def main(url: str, as_json: bool) -> None:
-    click.echo("Checking repository reputation...", err=True)
-    precheck = run_precheck(url)
+    with Spinner(stream=sys.stderr) as spinner:
+        spinner.update("🔎 Checking repository reputation...")
+        precheck = run_precheck(url)
 
-    analysis = None
-    multipass_warning = None
-    try:
-        analysis = run_analysis(
-            url, on_progress=lambda message: click.echo(message, err=True)
-        )
-    except MultipassNotAvailable as exc:
-        multipass_warning = str(exc)
+        analysis = None
+        multipass_warning = None
+        try:
+            analysis = run_analysis(url, on_progress=spinner.update)
+        except MultipassNotAvailable as exc:
+            multipass_warning = str(exc)
 
     verdict_result = compute_verdict(precheck, analysis)
 
@@ -45,7 +46,7 @@ def main(url: str, as_json: bool) -> None:
         return
 
     if multipass_warning is not None:
-        click.echo(f"WARNING: {multipass_warning}")
+        click.echo(f"⚠️  WARNING: {multipass_warning}")
         click.echo("")
 
     click.echo(render_report(precheck, analysis, verdict_result))

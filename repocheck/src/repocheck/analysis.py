@@ -84,11 +84,11 @@ def run_analysis(
     timeout: float = 600.0,
     on_progress: Callable[[str], None] = _default_progress_reporter,
 ) -> AnalysisReport:
-    on_progress("Launching disposable analysis VM (this can take a minute)...")
+    on_progress("🖥️  Launching disposable analysis VM (this can take a minute)...")
     clone_succeeded = False
     try:
         with EphemeralVM(launch_timeout=180.0) as vm:
-            on_progress("Installing analysis tools inside the VM (git, npm, detect-secrets)...")
+            on_progress("🛠️  Installing analysis tools inside the VM (git, npm, detect-secrets)...")
             bootstrap_result = vm.run(_BOOTSTRAP_COMMAND, timeout=240.0)
             if bootstrap_result.returncode != 0:
                 return AnalysisReport(
@@ -96,7 +96,7 @@ def run_analysis(
                     error=f"bootstrap failed: {bootstrap_result.stderr.strip()}",
                 )
 
-            on_progress("Cloning the repository inside the isolated VM...")
+            on_progress("📥 Cloning the repository inside the isolated VM...")
             clone_result = vm.run(
                 ["git", "clone", "--", url, _REMOTE_REPO_PATH], timeout=timeout
             )
@@ -107,7 +107,7 @@ def run_analysis(
                 )
             clone_succeeded = True
 
-            on_progress("Running static and dynamic analysis (network is cut before any build step)...")
+            on_progress("🔬 Running static and dynamic analysis (network is cut before any build step)...")
             vm.push_file(_ANALYZE_SCRIPT, _REMOTE_SCRIPT_PATH)
 
             analyze_result = vm.run(
@@ -120,7 +120,7 @@ def run_analysis(
                     error=f"analysis script failed: {analyze_result.stderr.strip()}",
                 )
 
-            on_progress("Collecting results and destroying the VM...")
+            on_progress("📦 Collecting results and destroying the VM...")
             local_report_path = _local_temp_report_path()
             vm.pull_file(_REMOTE_REPORT_PATH, local_report_path)
             payload = json.loads(local_report_path.read_text())

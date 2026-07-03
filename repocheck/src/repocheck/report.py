@@ -1,6 +1,12 @@
 from repocheck.analysis import AnalysisReport
 from repocheck.precheck import PrecheckResult
-from repocheck.verdict import VerdictResult
+from repocheck.verdict import Verdict, VerdictResult
+
+_VERDICT_EMOJI = {
+    Verdict.SAFE: "✅",
+    Verdict.SUSPICIOUS: "⚠️",
+    Verdict.MALICIOUS: "🚨",
+}
 
 
 def render_report(
@@ -8,7 +14,8 @@ def render_report(
     analysis: AnalysisReport | None,
     verdict_result: VerdictResult,
 ) -> str:
-    lines = [f"VERDICT: {verdict_result.verdict.value}", "", "Reasons:"]
+    emoji = _VERDICT_EMOJI[verdict_result.verdict]
+    lines = [f"{emoji} VERDICT: {verdict_result.verdict.value}", "", "Reasons:"]
     for reason in verdict_result.reasons:
         lines.append(f"  - {reason}")
 

@@ -24,11 +24,11 @@ O `repocheck` nunca clona nem executa nada do repositório-alvo no seu host. Tud
                           ┌────────────────────┐        │   - captura de telemetria  │
                           │  Pré-check de       │        └───────────────────────────┘
                           │  reputação via API  │                    │
-                          │  (GitHub/GitLab)    │                    ▼
+                          │  (GitHub/GitLab/Bitbucket)    │                    ▼
                           └────────────────────┘        JSON de achados + veredito
 ```
 
-1. **Pré-check de reputação** — consulta a API pública do GitHub/GitLab por idade do repositório, estrelas, forks e sinais de typosquatting. Puro metadado, nenhum código é tocado.
+1. **Pré-check de reputação** — consulta a API pública do GitHub/GitLab/Bitbucket por idade do repositório, estrelas/forks (quando disponível) e sinais de typosquatting. Puro metadado, nenhum código é tocado.
 2. **VM descartável** — uma VM [Multipass](https://multipass.run/) novinha em folha é criada a cada análise e é **sempre destruída** depois, mesmo em caso de erro ou timeout.
 3. **Scanners estáticos** (rodam dentro da VM, depois do clone, com a rede ainda ligada) — nunca executam nada, só leem arquivos:
    - Detecção de secrets (via [`detect-secrets`](https://github.com/Yelp/detect-secrets))
@@ -44,7 +44,7 @@ O `repocheck` nunca clona nem executa nada do repositório-alvo no seu host. Tud
 | Camada | Tecnologia |
 |---|---|
 | CLI / orquestração | Python 3.11+, [Click](https://click.palletsprojects.com/) |
-| Pré-check de reputação | APIs REST do GitHub/GitLab via [`requests`](https://requests.readthedocs.io/) |
+| Pré-check de reputação | APIs REST do GitHub/GitLab/Bitbucket via [`requests`](https://requests.readthedocs.io/) |
 | Isolamento | [Multipass](https://multipass.run/) (VMs Ubuntu 24.04 descartáveis — funciona em macOS, Linux e Windows) |
 | Scanner de secrets | [`detect-secrets`](https://github.com/Yelp/detect-secrets) |
 | Telemetria de rede | `iptables` (corte) + `strace` (captura de tentativas de conexão) |
@@ -128,7 +128,7 @@ cd repocheck
 PATH="$PWD/.venv/bin:$PATH" .venv/bin/pytest -v
 ```
 
-Dois testes exigem uma VM Multipass real e são pulados automaticamente se ela não estiver instalada. Com o Multipass instalado, a suíte completa (113 testes) roda de ponta a ponta, incluindo uma execução real do pipeline de análise contra um repositório público.
+Dois testes exigem uma VM Multipass real e são pulados automaticamente se ela não estiver instalada. Com o Multipass instalado, a suíte completa (128 testes) roda de ponta a ponta, incluindo uma execução real do pipeline de análise contra um repositório público.
 
 ## O que fica fora do escopo da v1
 

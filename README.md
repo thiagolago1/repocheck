@@ -24,11 +24,11 @@ Some malicious repositories execute code the moment you clone or install them: g
                           ┌────────────────────┐        │   - telemetry capture      │
                           │  Reputation         │        └───────────────────────────┘
                           │  precheck via API   │                    │
-                          │  (GitHub/GitLab)    │                    ▼
+                          │  (GitHub/GitLab/Bitbucket)    │                    ▼
                           └────────────────────┘        JSON findings + verdict
 ```
 
-1. **Reputation precheck** — queries the GitHub/GitLab public API for repo age, stars, forks, and typosquatting signals. Pure metadata, no code is touched.
+1. **Reputation precheck** — queries the GitHub/GitLab/Bitbucket public API for repo age, stars/forks (when available), and typosquatting signals. Pure metadata, no code is touched.
 2. **Disposable VM** — a brand-new [Multipass](https://multipass.run/) VM is created for every analysis and is **always destroyed** afterward, even on error or timeout.
 3. **Static scanners** (run inside the VM, after cloning, network still on) — never execute anything, only read files:
    - Secret detection (via [`detect-secrets`](https://github.com/Yelp/detect-secrets))
@@ -44,7 +44,7 @@ Some malicious repositories execute code the moment you clone or install them: g
 | Layer | Technology |
 |---|---|
 | CLI / orchestration | Python 3.11+, [Click](https://click.palletsprojects.com/) |
-| Reputation precheck | GitHub/GitLab REST APIs via [`requests`](https://requests.readthedocs.io/) |
+| Reputation precheck | GitHub/GitLab/Bitbucket REST APIs via [`requests`](https://requests.readthedocs.io/) |
 | Isolation | [Multipass](https://multipass.run/) (disposable Ubuntu 24.04 VMs — works on macOS, Linux, and Windows) |
 | Secrets scanning | [`detect-secrets`](https://github.com/Yelp/detect-secrets) |
 | Network telemetry | `iptables` (cutoff) + `strace` (connection-attempt capture) |
@@ -128,7 +128,7 @@ cd repocheck
 PATH="$PWD/.venv/bin:$PATH" .venv/bin/pytest -v
 ```
 
-Two tests require a real Multipass VM and are skipped automatically if it isn't installed. With Multipass installed, the full suite (113 tests) runs end-to-end, including a real analysis pipeline run against a public repository.
+Two tests require a real Multipass VM and are skipped automatically if it isn't installed. With Multipass installed, the full suite (128 tests) runs end-to-end, including a real analysis pipeline run against a public repository.
 
 ## What's out of scope for v1
 

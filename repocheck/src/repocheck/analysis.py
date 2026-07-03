@@ -17,9 +17,17 @@ _REMOTE_REPORT_PATH = "/home/ubuntu/report.json"
 _BOOTSTRAP_COMMAND = [
     "bash",
     "-c",
-    "sudo apt-get update -qq && "
-    "sudo apt-get install -y -qq git python3-pip nodejs npm strace && "
-    "pip3 install --quiet detect-secrets",
+    # ports.ubuntu.com's WAF returns 403 to apt's default "Debian APT-HTTP/..."
+    # User-Agent (observed directly against a real Multipass 24.04 VM) for
+    # BOTH the index update and package downloads; a generic User-Agent is
+    # accepted, so override it for every apt-get invocation.
+    "sudo apt-get update -qq -o Acquire::http::User-Agent=Mozilla/5.0 && "
+    "sudo apt-get install -y -qq -o Acquire::http::User-Agent=Mozilla/5.0 "
+    "git python3-pip nodejs npm strace && "
+    # Ubuntu 24.04 marks the system Python as externally-managed (PEP 668),
+    # refusing a bare `pip install`. This VM is single-purpose and disposable,
+    # so installing straight into the system Python is acceptable here.
+    "pip3 install --quiet --break-system-packages detect-secrets",
 ]
 
 

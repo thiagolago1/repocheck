@@ -1,6 +1,9 @@
 # Superpowers worktrees
 .worktrees/
 
+# Superpowers brainstorming scratch (visual companion sessions)
+.superpowers/
+
 # Python
 __pycache__/
 *.py[cod]

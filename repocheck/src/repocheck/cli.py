@@ -19,12 +19,15 @@ from repocheck.vm import MultipassNotAvailable
     help="Output raw JSON instead of a human-readable report.",
 )
 def main(url: str, as_json: bool) -> None:
+    click.echo("Checking repository reputation...", err=True)
     precheck = run_precheck(url)
 
     analysis = None
     multipass_warning = None
     try:
-        analysis = run_analysis(url)
+        analysis = run_analysis(
+            url, on_progress=lambda message: click.echo(message, err=True)
+        )
     except MultipassNotAvailable as exc:
         multipass_warning = str(exc)
 
@@ -42,7 +45,7 @@ def main(url: str, as_json: bool) -> None:
         return
 
     if multipass_warning is not None:
-        click.echo(f"AVISO: {multipass_warning}")
+        click.echo(f"WARNING: {multipass_warning}")
         click.echo("")
 
     click.echo(render_report(precheck, analysis, verdict_result))

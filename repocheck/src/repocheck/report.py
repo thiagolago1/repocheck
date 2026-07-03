@@ -8,39 +8,45 @@ def render_report(
     analysis: AnalysisReport | None,
     verdict_result: VerdictResult,
 ) -> str:
-    lines = [f"VEREDITO: {verdict_result.verdict.value}", "", "Motivos:"]
+    lines = [f"VERDICT: {verdict_result.verdict.value}", "", "Reasons:"]
     for reason in verdict_result.reasons:
         lines.append(f"  - {reason}")
 
     lines.append("")
-    lines.append("Pré-check:")
-    lines.append(f"  Plataforma: {precheck.location.platform}")
-    lines.append(f"  Alcançável: {'sim' if precheck.reachable else 'não'}")
+    lines.append("Precheck:")
+    lines.append(f"  Platform: {precheck.location.platform}")
+    lines.append(f"  Reachable: {'yes' if precheck.reachable else 'no'}")
     if precheck.reachable:
-        lines.append(f"  Idade (dias): {precheck.age_days}")
-        lines.append(f"  Estrelas: {precheck.stars}")
+        lines.append(f"  Age (days): {precheck.age_days}")
+        lines.append(f"  Stars: {precheck.stars}")
         lines.append(f"  Forks: {precheck.forks}")
 
     if analysis is None:
         lines.append("")
-        lines.append("Análise (estática/dinâmica): não executada (Multipass indisponível)")
+        lines.append("Analysis (static/dynamic): not executed (Multipass unavailable)")
         return "\n".join(lines)
 
-    lines.append("")
-    lines.append("Análise estática:")
-    lines.append(f"  Clone bem-sucedido: {'sim' if analysis.clone_succeeded else 'não'}")
-    lines.append(f"  Secrets encontrados: {len(analysis.secrets)}")
-    lines.append(f"  Padrões maliciosos: {len(analysis.malicious_patterns)}")
-    lines.append(f"  Achados de git: {len(analysis.git_findings)}")
+    real_secrets = [f for f in analysis.secrets if f["rule"] != "scanner_not_executed"]
+    secrets_scanner_failed = len(real_secrets) != len(analysis.secrets)
 
     lines.append("")
-    lines.append("Etapa dinâmica:")
-    lines.append(f"  Tentada: {'sim' if analysis.dynamic_attempted else 'não'}")
+    lines.append("Static analysis:")
+    lines.append(f"  Clone succeeded: {'yes' if analysis.clone_succeeded else 'no'}")
+    secrets_line = f"  Secrets found: {len(real_secrets)}"
+    if secrets_scanner_failed:
+        secrets_line += " (scanner could not run — not confirmed clean)"
+    lines.append(secrets_line)
+    lines.append(f"  Malicious patterns: {len(analysis.malicious_patterns)}")
+    lines.append(f"  Git findings: {len(analysis.git_findings)}")
+
+    lines.append("")
+    lines.append("Dynamic step:")
+    lines.append(f"  Attempted: {'yes' if analysis.dynamic_attempted else 'no'}")
     if analysis.dynamic_attempted:
-        lines.append(f"  Comando: {' '.join(analysis.dynamic_command or [])}")
-        lines.append(f"  Timeout: {'sim' if analysis.dynamic_timed_out else 'não'}")
+        lines.append(f"  Command: {' '.join(analysis.dynamic_command or [])}")
+        lines.append(f"  Timed out: {'yes' if analysis.dynamic_timed_out else 'no'}")
         lines.append(
-            f"  Tentativas de rede após corte: {len(analysis.network_connect_attempts)}"
+            f"  Network attempts after cutoff: {len(analysis.network_connect_attempts)}"
         )
 
     return "\n".join(lines)

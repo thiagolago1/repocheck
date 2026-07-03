@@ -1,9 +1,11 @@
 import json
+import re
+import sys
 import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from repocheck.vm import EphemeralVM
 
@@ -30,6 +32,27 @@ _BOOTSTRAP_COMMAND = [
     "pip3 install --quiet --break-system-packages detect-secrets",
 ]
 
+# Matches git's progress-meter lines (e.g. "Updating files:  43% (180/414)"),
+# which are noisy and not useful inside an error message.
+_GIT_PROGRESS_LINE = re.compile(
+    r"^\s*(Updating files|Receiving objects|Resolving deltas|"
+    r"Counting objects|Compressing objects):\s+\d+%"
+)
+
+
+def _clean_git_stderr(stderr: str) -> str:
+    meaningful = [
+        line
+        for line in stderr.splitlines()
+        if line.strip() and not _GIT_PROGRESS_LINE.match(line)
+    ]
+    cleaned = "\n".join(meaningful).strip()
+    return cleaned or stderr.strip()
+
+
+def _default_progress_reporter(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
 
 @dataclass
 class AnalysisReport:
@@ -50,8 +73,14 @@ def _local_temp_report_path() -> Path:
     return Path(tempfile.gettempdir()) / f"repocheck-report-{uuid.uuid4().hex}.json"
 
 
-def run_analysis(url: str, timeout: float = 300.0) -> AnalysisReport:
+def run_analysis(
+    url: str,
+    timeout: float = 300.0,
+    on_progress: Callable[[str], None] = _default_progress_reporter,
+) -> AnalysisReport:
+    on_progress("Launching disposable analysis VM (this can take a minute)...")
     with EphemeralVM(launch_timeout=180.0) as vm:
+        on_progress("Installing analysis tools inside the VM (git, npm, detect-secrets)...")
         bootstrap_result = vm.run(_BOOTSTRAP_COMMAND, timeout=240.0)
         if bootstrap_result.returncode != 0:
             return AnalysisReport(
@@ -59,15 +88,17 @@ def run_analysis(url: str, timeout: float = 300.0) -> AnalysisReport:
                 error=f"bootstrap failed: {bootstrap_result.stderr.strip()}",
             )
 
+        on_progress("Cloning the repository inside the isolated VM...")
         clone_result = vm.run(
             ["git", "clone", "--", url, _REMOTE_REPO_PATH], timeout=timeout
         )
         if clone_result.returncode != 0:
             return AnalysisReport(
                 clone_succeeded=False,
-                error=f"clone failed: {clone_result.stderr.strip()}",
+                error=f"clone failed: {_clean_git_stderr(clone_result.stderr)}",
             )
 
+        on_progress("Running static and dynamic analysis (network is cut before any build step)...")
         vm.push_file(_ANALYZE_SCRIPT, _REMOTE_SCRIPT_PATH)
 
         analyze_result = vm.run(
@@ -80,6 +111,7 @@ def run_analysis(url: str, timeout: float = 300.0) -> AnalysisReport:
                 error=f"analysis script failed: {analyze_result.stderr.strip()}",
             )
 
+        on_progress("Collecting results and destroying the VM...")
         local_report_path = _local_temp_report_path()
         vm.pull_file(_REMOTE_REPORT_PATH, local_report_path)
         payload = json.loads(local_report_path.read_text())

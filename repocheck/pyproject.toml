@@ -1,7 +1,7 @@
 [project]
 name = "repocheck"
 version = "0.1.0"
-description = "Analisa repositórios git em busca de código malicioso antes de clonar/instalar localmente."
+description = "Analyzes git repositories for malicious content before you clone/install them locally."
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",

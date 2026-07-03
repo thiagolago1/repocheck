@@ -9,9 +9,9 @@ _LOW_STAR_THRESHOLD = 5
 
 
 class Verdict(Enum):
-    SAFE = "SEGURO"
-    SUSPICIOUS = "SUSPEITO"
-    MALICIOUS = "MALICIOSO"
+    SAFE = "SAFE"
+    SUSPICIOUS = "SUSPICIOUS"
+    MALICIOUS = "MALICIOUS"
 
 
 @dataclass
@@ -27,7 +27,7 @@ def compute_verdict(
         return VerdictResult(
             verdict=Verdict.SUSPICIOUS,
             reasons=[
-                "análise dinâmica/estática não pôde ser executada (Multipass indisponível)"
+                "static/dynamic analysis could not be executed (Multipass unavailable)"
             ],
         )
 
@@ -35,21 +35,21 @@ def compute_verdict(
     suspicious_reasons: list[str] = []
 
     if analysis.error is not None:
-        suspicious_reasons.append(f"análise incompleta: {analysis.error}")
+        suspicious_reasons.append(f"incomplete analysis: {analysis.error}")
 
     real_secrets = [f for f in analysis.secrets if f["rule"] != "scanner_not_executed"]
     if real_secrets:
         malicious_reasons.append(
-            f"{len(real_secrets)} segredo(s) encontrado(s) no código"
+            f"{len(real_secrets)} secret(s) found in the code"
         )
 
     scanner_gaps = [f for f in analysis.secrets if f["rule"] == "scanner_not_executed"]
     if scanner_gaps:
-        suspicious_reasons.append("scanner de secrets não pôde ser executado")
+        suspicious_reasons.append("the secrets scanner could not be executed")
 
     if analysis.malicious_patterns:
         malicious_reasons.append(
-            f"{len(analysis.malicious_patterns)} padrão(ões) malicioso(s) encontrado(s)"
+            f"{len(analysis.malicious_patterns)} malicious pattern(s) found"
         )
 
     ext_transport_findings = [
@@ -57,7 +57,7 @@ def compute_verdict(
     ]
     if ext_transport_findings:
         malicious_reasons.append(
-            "submódulo git usando transporte 'ext::' (execução arbitrária de comando)"
+            "git submodule using the 'ext::' transport (arbitrary command execution)"
         )
 
     other_git_findings = [
@@ -65,27 +65,27 @@ def compute_verdict(
     ]
     if other_git_findings:
         suspicious_reasons.append(
-            f"{len(other_git_findings)} achado(s) suspeito(s) específico(s) de git"
+            f"{len(other_git_findings)} git-specific finding(s)"
         )
 
     if analysis.network_connect_attempts:
         malicious_reasons.append(
-            f"{len(analysis.network_connect_attempts)} tentativa(s) de conexão de "
-            "rede após o corte de rede"
+            f"{len(analysis.network_connect_attempts)} network connection attempt(s) "
+            "after the network cutoff"
         )
 
     if analysis.dynamic_timed_out:
-        suspicious_reasons.append("etapa dinâmica não terminou dentro do timeout")
+        suspicious_reasons.append("the dynamic step did not finish within the timeout")
 
     if analysis.dynamic_attempted and analysis.network_cutoff_applied is False:
         suspicious_reasons.append(
-            "a etapa dinâmica rodou sem corte de rede confirmado (iptables falhou "
-            "dentro da VM) — o build/install pode ter tido acesso à rede"
+            "the dynamic step ran without a confirmed network cutoff (iptables "
+            "failed inside the VM) — the build/install may have had network access"
         )
 
     if precheck.possible_typosquat:
         suspicious_reasons.append(
-            f"nome suspeito de typosquatting (parecido com '{precheck.typosquat_match}')"
+            f"suspicious name, resembling a typosquat of '{precheck.typosquat_match}'"
         )
 
     if (
@@ -96,8 +96,8 @@ def compute_verdict(
         and precheck.stars < _LOW_STAR_THRESHOLD
     ):
         suspicious_reasons.append(
-            f"repositório muito novo ({precheck.age_days} dia(s)) e pouco popular "
-            f"({precheck.stars} estrela(s))"
+            f"very young repository ({precheck.age_days} day(s) old) with low "
+            f"popularity ({precheck.stars} star(s))"
         )
 
     if malicious_reasons:
@@ -106,4 +106,4 @@ def compute_verdict(
         )
     if suspicious_reasons:
         return VerdictResult(verdict=Verdict.SUSPICIOUS, reasons=suspicious_reasons)
-    return VerdictResult(verdict=Verdict.SAFE, reasons=["nenhum achado relevante"])
+    return VerdictResult(verdict=Verdict.SAFE, reasons=["no relevant findings"])

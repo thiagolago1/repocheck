@@ -48,10 +48,19 @@ class VMTransferError(Exception):
 DEFAULT_IMAGE = "24.04"
 
 
+DEFAULT_DISK = "20G"
+
+
 class EphemeralVM:
-    def __init__(self, image: str = DEFAULT_IMAGE, launch_timeout: float = 120.0):
+    def __init__(
+        self,
+        image: str = DEFAULT_IMAGE,
+        launch_timeout: float = 120.0,
+        disk: str = DEFAULT_DISK,
+    ):
         self.image = image
         self.launch_timeout = launch_timeout
+        self.disk = disk
         self.name = f"repocheck-{uuid.uuid4().hex[:12]}"
 
     def __enter__(self) -> "EphemeralVM":
@@ -65,6 +74,7 @@ class EphemeralVM:
                 [
                     "multipass", "launch", self.image, "--name", self.name,
                     "--timeout", str(int(self.launch_timeout)),
+                    "--disk", self.disk,
                 ],
                 capture_output=True,
                 text=True,

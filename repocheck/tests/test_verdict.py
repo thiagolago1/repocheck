@@ -55,7 +55,7 @@ def test_secrets_found_is_malicious():
     )
     result = compute_verdict(_make_precheck(), analysis)
     assert result.verdict == Verdict.MALICIOUS
-    assert any("segredo" in reason for reason in result.reasons)
+    assert any("secret" in reason for reason in result.reasons)
 
 
 def test_malicious_pattern_found_is_malicious():
@@ -117,7 +117,7 @@ def test_dynamic_step_without_confirmed_network_cutoff_is_suspicious():
     )
     result = compute_verdict(_make_precheck(), analysis)
     assert result.verdict == Verdict.SUSPICIOUS
-    assert any("corte de rede" in reason for reason in result.reasons)
+    assert any("network cutoff" in reason for reason in result.reasons)
 
 
 def test_dynamic_not_attempted_with_no_cutoff_info_is_safe():

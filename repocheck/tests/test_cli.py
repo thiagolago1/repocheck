@@ -39,7 +39,7 @@ def test_cli_reports_safe_verdict_for_clean_repo():
             result = runner.invoke(main, ["https://github.com/acme/widget"])
 
     assert result.exit_code == 0
-    assert "VEREDITO: SEGURO" in result.output
+    assert "VERDICT: SAFE" in result.output
 
 
 def test_cli_reports_malicious_verdict_when_secrets_found():
@@ -53,7 +53,7 @@ def test_cli_reports_malicious_verdict_when_secrets_found():
             result = runner.invoke(main, ["https://github.com/acme/widget"])
 
     assert result.exit_code == 0
-    assert "VEREDITO: MALICIOSO" in result.output
+    assert "VERDICT: MALICIOUS" in result.output
 
 
 def test_cli_json_output_includes_verdict_and_reports():
@@ -63,8 +63,8 @@ def test_cli_json_output_includes_verdict_and_reports():
             result = runner.invoke(main, ["https://github.com/acme/widget", "--json"])
 
     assert result.exit_code == 0
-    payload = json.loads(result.output)
-    assert payload["verdict"] == "SEGURO"
+    payload = json.loads(result.stdout)
+    assert payload["verdict"] == "SAFE"
     assert payload["precheck"]["location"]["platform"] == "github"
     assert payload["analysis"]["clone_succeeded"] is True
 
@@ -79,8 +79,8 @@ def test_cli_handles_multipass_unavailable_gracefully():
             result = runner.invoke(main, ["https://github.com/acme/widget"])
 
     assert result.exit_code == 0
-    assert "AVISO" in result.output
-    assert "VEREDITO: SUSPEITO" in result.output
+    assert "WARNING" in result.output
+    assert "VERDICT: SUSPICIOUS" in result.output
 
 
 def test_cli_json_output_includes_multipass_warning():
@@ -92,7 +92,7 @@ def test_cli_json_output_includes_multipass_warning():
         ):
             result = runner.invoke(main, ["https://github.com/acme/widget", "--json"])
 
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload["analysis"] is None
     assert payload["multipass_warning"] == "multipass CLI not found"
-    assert payload["verdict"] == "SUSPEITO"
+    assert payload["verdict"] == "SUSPICIOUS"

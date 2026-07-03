@@ -82,7 +82,7 @@ def test_enter_launches_vm_with_correct_command():
     launch_call = mock_run.call_args_list[0]
     assert launch_call.args[0] == [
         "multipass", "launch", "24.04", "--name", launch_name,
-        "--timeout", "60",
+        "--timeout", "60", "--disk", "20G",
     ]
     assert launch_call.kwargs["timeout"] == 90.0
 

@@ -28,12 +28,12 @@ def _make_precheck(**overrides) -> PrecheckResult:
 def test_render_report_includes_verdict_and_reasons():
     precheck = _make_precheck()
     analysis = AnalysisReport(clone_succeeded=True)
-    verdict_result = VerdictResult(verdict=Verdict.SAFE, reasons=["nenhum achado relevante"])
+    verdict_result = VerdictResult(verdict=Verdict.SAFE, reasons=["no relevant findings"])
 
     output = render_report(precheck, analysis, verdict_result)
 
-    assert "VEREDITO: SEGURO" in output
-    assert "nenhum achado relevante" in output
+    assert "VERDICT: SAFE" in output
+    assert "no relevant findings" in output
 
 
 def test_render_report_includes_precheck_summary():
@@ -57,22 +57,45 @@ def test_render_report_includes_dynamic_step_summary_when_attempted():
         dynamic_timed_out=False,
         network_connect_attempts=["connect(3, ...)"],
     )
-    verdict_result = VerdictResult(verdict=Verdict.MALICIOUS, reasons=["1 tentativa(s) de conexão de rede"])
+    verdict_result = VerdictResult(verdict=Verdict.MALICIOUS, reasons=["1 network connection attempt(s)"])
 
     output = render_report(precheck, analysis, verdict_result)
 
     assert "npm install" in output
-    assert "Tentativas de rede após corte: 1" in output
+    assert "Network attempts after cutoff: 1" in output
+
+
+def test_render_report_does_not_count_scanner_not_executed_as_a_secret():
+    precheck = _make_precheck()
+    analysis = AnalysisReport(
+        clone_succeeded=True,
+        secrets=[
+            {
+                "rule": "scanner_not_executed",
+                "file": "",
+                "line": 0,
+                "snippet": "detect-secrets unavailable",
+            }
+        ],
+    )
+    verdict_result = VerdictResult(
+        verdict=Verdict.SUSPICIOUS, reasons=["the secrets scanner could not be executed"]
+    )
+
+    output = render_report(precheck, analysis, verdict_result)
+
+    assert "Secrets found: 0" in output
+    assert "scanner could not run" in output
 
 
 def test_render_report_handles_missing_analysis():
     precheck = _make_precheck()
     verdict_result = VerdictResult(
         verdict=Verdict.SUSPICIOUS,
-        reasons=["análise dinâmica/estática não pôde ser executada (Multipass indisponível)"],
+        reasons=["static/dynamic analysis could not be executed (Multipass unavailable)"],
     )
 
     output = render_report(precheck, None, verdict_result)
 
-    assert "VEREDITO: SUSPEITO" in output
-    assert "não executada" in output
+    assert "VERDICT: SUSPICIOUS" in output
+    assert "not executed" in output

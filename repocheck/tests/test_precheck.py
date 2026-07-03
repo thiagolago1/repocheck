@@ -67,6 +67,41 @@ def test_precheck_gitlab_reachable_repo():
     assert result.owner_type == "group"
 
 
+@responses.activate
+def test_precheck_bitbucket_reachable_repo():
+    responses.add(
+        responses.GET,
+        "https://api.bitbucket.org/2.0/repositories/atlassian/python-bitbucket",
+        json={
+            "created_on": "2013-05-01T00:00:00.000000+00:00",
+            "owner": {"type": "team"},
+        },
+        status=200,
+    )
+
+    result = run_precheck("https://bitbucket.org/atlassian/python-bitbucket")
+
+    assert result.location.platform == "bitbucket"
+    assert result.reachable is True
+    assert result.owner_type == "team"
+    assert result.age_days is not None and result.age_days > 0
+
+
+@responses.activate
+def test_precheck_bitbucket_unreachable_repo():
+    responses.add(
+        responses.GET,
+        "https://api.bitbucket.org/2.0/repositories/someowner/does-not-exist",
+        json={"error": {"message": "Repository not found"}},
+        status=404,
+    )
+
+    result = run_precheck("https://bitbucket.org/someowner/does-not-exist")
+
+    assert result.reachable is False
+    assert result.error is not None
+
+
 def test_precheck_unknown_platform_is_skipped_without_error():
     result = run_precheck("https://git.example.com/team/project")
 

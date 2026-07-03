@@ -30,6 +30,20 @@ def test_detects_gitlab_https_url():
     assert location.repo == "gitlab"
 
 
+def test_detects_bitbucket_https_url():
+    location = detect_platform("https://bitbucket.org/atlassian/python-bitbucket")
+    assert location.platform == "bitbucket"
+    assert location.owner == "atlassian"
+    assert location.repo == "python-bitbucket"
+
+
+def test_detects_bitbucket_url_with_git_suffix():
+    location = detect_platform("https://bitbucket.org/atlassian/python-bitbucket.git")
+    assert location.platform == "bitbucket"
+    assert location.owner == "atlassian"
+    assert location.repo == "python-bitbucket"
+
+
 def test_unknown_platform_for_self_hosted_url():
     location = detect_platform("https://git.example.com/team/project")
     assert location.platform == "unknown"

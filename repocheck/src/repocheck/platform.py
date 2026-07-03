@@ -13,6 +13,9 @@ class RepoLocation:
 _PATTERNS = {
     "github": re.compile(r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(\.git)?/?$"),
     "gitlab": re.compile(r"^https?://gitlab\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(\.git)?/?$"),
+    "bitbucket": re.compile(
+        r"^https?://bitbucket\.org/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(\.git)?/?$"
+    ),
 }
 
 

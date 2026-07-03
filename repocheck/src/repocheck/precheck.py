@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from repocheck import github_client, gitlab_client
+from repocheck import bitbucket_client, github_client, gitlab_client
 from repocheck.platform import RepoLocation, detect_platform
 from repocheck.popular_names import POPULAR_REPO_NAMES
 from repocheck.typosquat import find_typosquat_match
@@ -120,6 +120,36 @@ def run_precheck(url: str) -> PrecheckResult:
             stars=raw.get("star_count"),
             forks=raw.get("forks_count"),
             owner_type=raw.get("namespace", {}).get("kind"),
+            possible_typosquat=typosquat_match is not None,
+            typosquat_match=typosquat_match,
+            raw=raw,
+        )
+
+    if location.platform == "bitbucket" and location.owner and location.repo:
+        try:
+            raw = bitbucket_client.fetch_repo_metadata(location.owner, location.repo)
+        except (
+            bitbucket_client.BitbucketClientError,
+            requests.exceptions.RequestException,
+        ) as exc:
+            return PrecheckResult(
+                location=location,
+                reachable=False,
+                error=str(exc),
+                possible_typosquat=typosquat_match is not None,
+                typosquat_match=typosquat_match,
+            )
+        return PrecheckResult(
+            location=location,
+            reachable=True,
+            age_days=_age_in_days(raw.get("created_on")),
+            # Bitbucket Cloud's repository endpoint doesn't expose star/fork
+            # counts directly (those live behind separate paginated
+            # `/watchers` and `/forks` endpoints) -- leave them unknown
+            # rather than making extra calls for a v1 nice-to-have signal.
+            stars=None,
+            forks=None,
+            owner_type=(raw.get("owner") or {}).get("type"),
             possible_typosquat=typosquat_match is not None,
             typosquat_match=typosquat_match,
             raw=raw,

@@ -137,6 +137,10 @@ Two tests require a real Multipass VM and are skipped automatically if it isn't 
 - Caching/allowlisting of previously-analyzed repositories.
 - VM backends other than Multipass.
 
+## Design rationale
+
+For the original design discussion (why a disposable VM, why Multipass over Lima, testing strategy, edge cases) see [`docs/design.md`](docs/design.md) (in Portuguese).
+
 ## Contributing
 
 Pull requests are welcome! All contributions are reviewed before merging. Please open an issue first for significant changes so we can discuss the approach.

@@ -6,7 +6,7 @@ Antes de clonar e instalar um repositório de código de origem desconhecida (Gi
 
 ## Objetivo da v1
 
-Dado uma URL de repositório, produzir um veredito (SEGURO / SUSPEITO / MALICIOSO) com relatório detalhado, sem nunca expor a máquina do usuário ao conteúdo não confiável do repositório.
+Dado uma URL de repositório, produzir um veredito (SAFE / SUSPICIOUS / MALICIOUS) com relatório detalhado, sem nunca expor a máquina do usuário ao conteúdo não confiável do repositório.
 
 ## Arquitetura
 
@@ -42,7 +42,7 @@ Dado uma URL de repositório, produzir um veredito (SEGURO / SUSPEITO / MALICIOS
 - **Motor de detecção:** combinação de scanners de segurança estabelecidos (detecção de secrets, scanner de dependências vulneráveis agnóstico de linguagem — ex. OSV-Scanner —, regras de padrões maliciosos, checagens específicas de git) **com** revisão por LLM. A revisão por LLM é feita pela própria sessão do Claude Code lendo o JSON de achados e os trechos sinalizados — não uma chamada de API separada dentro do Python. Quando o CLI roda fora do Claude Code (`--json-only`), essa etapa fica indisponível e o relatório deixa isso explícito.
 - **Escopo de ecossistema:** genérico — o foco é o repositório git como um todo (hooks, submódulos, `.gitattributes`/filtros, Makefiles, scripts de shell), não um gerenciador de pacotes específico. Scanners de dependência agnósticos de linguagem são usados quando manifestos conhecidos existem.
 - **Política de rede na VM:** rede permitida só durante o clone inicial; depois é cortada por regra de firewall interna antes de qualquer passo de build/instalação. Tentativas de rede após o corte são logadas como sinal forte de comportamento malicioso.
-- **Relatório:** veredito no topo (SEGURO/SUSPEITO/MALICIOSO) + seções detalhadas com achados dos scanners, telemetria da VM (processos, acessos a arquivo fora do repo, tentativas de rede bloqueadas) e a análise da LLM sobre os trechos sinalizados.
+- **Relatório:** veredito no topo (SAFE/SUSPICIOUS/MALICIOUS) + seções detalhadas com achados dos scanners, telemetria da VM (processos, acessos a arquivo fora do repo, tentativas de rede bloqueadas) e a análise da LLM sobre os trechos sinalizados.
 
 ## Componentes
 
@@ -68,7 +68,7 @@ Dado uma URL de repositório, produzir um veredito (SEGURO / SUSPEITO / MALICIOS
 
 ## Tratamento de erros e casos de borda
 
-- **Timeout na etapa dinâmica:** VM é destruída do mesmo jeito; relatório registra "análise dinâmica incompleta" como item SUSPEITO (nunca vira SEGURO por padrão sem confirmação).
+- **Timeout na etapa dinâmica:** VM é destruída do mesmo jeito; relatório registra "análise dinâmica incompleta" como item SUSPICIOUS (never becomes SAFE by default without confirmation).
 - **Multipass/hypervisor indisponível:** `repocheck` recusa rodar a etapa dinâmica e avisa claramente que só a análise estática (mais fraca) está disponível — nunca faz fallback silencioso pra clonar no host.
 - **Repo privado (exige autenticação):** credenciais/token são passadas só para dentro da VM efêmera, nunca ficam salvas após ela ser destruída, e nunca usa as credenciais git padrão do host sem confirmação explícita.
 - **Plataforma desconhecida/self-hosted:** pré-check via API é pulado; pipeline estático/dinâmico dentro da VM continua funcionando normalmente (agnóstico de plataforma).
@@ -80,7 +80,7 @@ Dado uma URL de repositório, produzir um veredito (SEGURO / SUSPEITO / MALICIOS
 
 - **Testes unitários (host, rápidos, sem VM):** parsing de URL/plataforma, lógica do pré-check via API (mockada), parsing do JSON de achados, lógica de composição de veredito a partir de achados simulados.
 - **Testes de integração (Multipass real, mais lentos):** contra casos de teste controlados:
-  - repo limpo → SEGURO;
+  - repo limpo → SAFE;
   - repo com secret hardcoded → pego pelo scanner de secrets;
   - repo com dependência vulnerável conhecida → pego pelo scanner de deps;
   - repo com `postinstall` que tenta conexão de rede → aparece na telemetria mesmo com rede cortada;

@@ -137,6 +137,10 @@ Dois testes exigem uma VM Multipass real e são pulados automaticamente se ela n
 - Cache/allowlist de repositórios já analisados.
 - Backends de VM além do Multipass.
 
+## Racional de design
+
+Pra ver a discussão original de design (por que uma VM descartável, por que Multipass em vez de Lima, estratégia de testes, casos de borda), veja [`docs/design.md`](docs/design.md).
+
 ## Contribuindo
 
 Pull requests são bem-vindos! Todas as contribuições passam por revisão antes do merge. Pra mudanças significativas, abra uma issue primeiro pra gente discutir a abordagem.

@@ -6,6 +6,8 @@
 
 [![Licença: Apache 2.0](https://img.shields.io/badge/Licença-Apache%202.0-blue.svg)](LICENSE)
 
+**🔗 [Landing page](https://thiagolago1.github.io/repocheck/)**
+
 ## O problema
 
 Alguns repositórios maliciosos executam código no exato momento em que você clona ou instala: hooks de git, scripts de build (`postinstall`, `setup.py`), submódulos git maliciosos, ou filtros de `.gitattributes` forjados. Quando você percebe que algo está errado, o estrago já foi feito — na sua máquina.

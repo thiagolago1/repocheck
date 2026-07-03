@@ -1,6 +1,32 @@
+# Superpowers worktrees
 .worktrees/
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.egg-info/
+dist/
+build/
+*.egg
 .venv/
+venv/
+.env
+
+# Test / coverage artifacts (pytest self-ignores .pytest_cache/ internally,
+# listed here too for clarity and for other tools that don't)
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# OS / editor junk
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Claude Code local (machine-specific) settings — never shared
 .claude/settings.local.json

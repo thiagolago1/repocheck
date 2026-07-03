@@ -139,7 +139,7 @@ Dois testes exigem uma VM Multipass real e são pulados automaticamente se ela n
 
 ## Racional de design
 
-Pra ver a discussão original de design (por que uma VM descartável, por que Multipass em vez de Lima, estratégia de testes, casos de borda), veja [`docs/design.md`](docs/design.md).
+Pra ver a discussão original de design (por que uma VM descartável, por que Multipass em vez de Lima, estratégia de testes, casos de borda), veja [`docs/design.pt-BR.md`](docs/design.pt-BR.md) ([English](docs/design.md)).
 
 ## Contribuindo
 

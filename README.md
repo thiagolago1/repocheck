@@ -139,7 +139,7 @@ Two tests require a real Multipass VM and are skipped automatically if it isn't 
 
 ## Design rationale
 
-For the original design discussion (why a disposable VM, why Multipass over Lima, testing strategy, edge cases) see [`docs/design.md`](docs/design.md) (in Portuguese).
+For the original design discussion (why a disposable VM, why Multipass over Lima, testing strategy, edge cases) see [`docs/design.md`](docs/design.md) ([Português](docs/design.pt-BR.md)).
 
 ## Contributing
 

@@ -43,14 +43,14 @@ Given a repository URL, produce a verdict (SAFE / SUSPICIOUS / MALICIOUS) with a
 - **Isolation:** disposable local VM via **Multipass** (not Lima) — Multipass is genuinely cross-platform (Hyper-V on Windows, QEMU/KVM on Linux, Virtualization.framework on macOS) with the same CLI interface, guaranteeing real Windows/Linux/macOS support already in v1.
 - **Detection engine:** a combination of established security scanners (secret detection, a language-agnostic vulnerable-dependency scanner — e.g. OSV-Scanner —, malicious-pattern rules, git-specific checks) **with** LLM review. The LLM review is done by the Claude Code session itself reading the JSON findings and flagged snippets — not a separate API call inside the Python tool. When the CLI runs outside Claude Code (`--json`), this stage is unavailable and the report makes that explicit.
 - **Ecosystem scope:** generic — the focus is the git repository as a whole (hooks, submodules, `.gitattributes`/filters, Makefiles, shell scripts), not a specific package manager. Language-agnostic dependency scanners are used when known manifests exist.
-- **VM network policy:** network is allowed only during the initial clone; it is then cut by an internal firewall rule before any build/install step. Network attempts after the cutoff are logged as a strong signal of malicious behavior.
+- **VM network policy (two-phase dynamic step):** fetching dependencies and executing install code are deliberately separated, so that downloading declared dependencies is never mistaken for malice. Phase 1 (network up, unwatched): dependencies are downloaded with lifecycle code disabled (`npm install --ignore-scripts` / `pip download`). Phase 2 (network cut by an internal firewall rule, watched): the code an install actually runs — lifecycle scripts (`postinstall`, etc.) and `setup.py` — is executed under `strace`. Only then is an outbound connection attempt a signal, since a build script has no legitimate reason to reach the network after the cutoff.
 - **Report:** verdict up top (SAFE/SUSPICIOUS/MALICIOUS) + detailed sections with scanner findings, VM telemetry (processes, file access outside the repo, blocked network attempts), and the LLM's analysis of the flagged snippets.
 
 ## Components
 
 1. **`repocheck` (Python CLI, host)** — the orchestrator. Commands: `repocheck <url>` (full pipeline) and `repocheck <url> --json` (no LLM stage, for CI or when invoked by the skill).
 2. **API precheck (host)** — identifies the platform from the URL and queries the public API (repo age, stars/forks, author/org verification, typosquatting signals in the name). Purely metadata, never touches the code. Unknown platforms skip this stage without error.
-3. **Analysis script (inside the Multipass VM)** — copied into the VM before it boots (never downloaded from the target). Runs: clone → network cutoff → static scanners → generic dynamic step (attempts whatever build/install steps the repo declares) → telemetry capture → writes structured JSON.
+3. **Analysis script (inside the Multipass VM)** — copied into the VM before it boots (never downloaded from the target). Runs: clone → static scanners → two-phase dynamic step (fetch dependencies with the network up and no scripts running → cut the network → execute the lifecycle scripts/`setup.py` under strace) → telemetry capture → writes structured JSON.
 4. **VM lifecycle (host)** — creates a fresh instance for every analysis (never reused), copies out the JSON, and **always** destroys the VM at the end — including on timeout/error/crash.
 5. **LLM review (Claude Code session)** — reads the JSON + flagged snippets, decides what to investigate further, produces a judgment of intent.
 6. **Claude Code skill** — exposes this as a natural-language command, calls `repocheck --json`, and presents the verdict conversationally.
@@ -60,9 +60,9 @@ Given a repository URL, produce a verdict (SAFE / SUSPICIOUS / MALICIOUS) with a
 1. Input: repository URL (directly, or via natural language in the skill).
 2. API precheck (host, seconds) — flags reputation before spending time on the VM, but doesn't skip the full analysis by default.
 3. Provisioning of a fresh Multipass VM, from a fixed base image.
-4. Repository clone (network on), followed by a network cutoff inside the VM.
+4. Repository clone (network on).
 5. Static scanners run over the files without executing anything.
-6. Dynamic step: declared build/install steps are attempted, with every process execution, file access outside the repo, and blocked network attempt being captured.
+6. Dynamic step (two phases): dependencies are downloaded with the network up and without running any project scripts; the network is then cut and the code an install actually executes (lifecycle scripts, `setup.py`) is run under strace, capturing any outbound connection attempt after the cutoff.
 7. The only artifact leaving the VM: the JSON of findings + telemetry (never the repository's source code).
 8. The VM is destroyed — always, even on an error path.
 9. LLM review (if available, in the Claude Code session).

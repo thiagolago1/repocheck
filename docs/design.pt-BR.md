@@ -43,14 +43,14 @@ Dado uma URL de repositório, produzir um veredito (SAFE / SUSPICIOUS / MALICIOU
 - **Isolamento:** VM local descartável via **Multipass** (não Lima) — Multipass é genuinamente multiplataforma (Hyper-V no Windows, QEMU/KVM no Linux, Virtualization.framework no macOS) usando a mesma interface de CLI, o que garante suporte real a Windows/Linux/macOS já na v1.
 - **Motor de detecção:** combinação de scanners de segurança estabelecidos (detecção de secrets, scanner de dependências vulneráveis agnóstico de linguagem — ex. OSV-Scanner —, regras de padrões maliciosos, checagens específicas de git) **com** revisão por LLM. A revisão por LLM é feita pela própria sessão do Claude Code lendo o JSON de achados e os trechos sinalizados — não uma chamada de API separada dentro do Python. Quando o CLI roda fora do Claude Code (`--json-only`), essa etapa fica indisponível e o relatório deixa isso explícito.
 - **Escopo de ecossistema:** genérico — o foco é o repositório git como um todo (hooks, submódulos, `.gitattributes`/filtros, Makefiles, scripts de shell), não um gerenciador de pacotes específico. Scanners de dependência agnósticos de linguagem são usados quando manifestos conhecidos existem.
-- **Política de rede na VM:** rede permitida só durante o clone inicial; depois é cortada por regra de firewall interna antes de qualquer passo de build/instalação. Tentativas de rede após o corte são logadas como sinal forte de comportamento malicioso.
+- **Política de rede na VM (passo dinâmico em duas fases):** buscar dependências e executar o código de instalação são separados de propósito, pra que baixar dependências declaradas nunca seja confundido com malícia. Fase 1 (rede ligada, não vigiada): as dependências são baixadas com o código de ciclo de vida desabilitado (`npm install --ignore-scripts` / `pip download`). Fase 2 (rede cortada por regra de firewall interna, vigiada): o código que uma instalação de fato roda — scripts de ciclo de vida (`postinstall`, etc.) e `setup.py` — é executado sob `strace`. Só aí uma tentativa de conexão externa é sinal, já que um script de build não tem motivo legítimo pra acessar a rede depois do corte.
 - **Relatório:** veredito no topo (SAFE/SUSPICIOUS/MALICIOUS) + seções detalhadas com achados dos scanners, telemetria da VM (processos, acessos a arquivo fora do repo, tentativas de rede bloqueadas) e a análise da LLM sobre os trechos sinalizados.
 
 ## Componentes
 
 1. **`repocheck` (CLI Python, host)** — orquestrador. Comandos: `repocheck <url>` (pipeline completo) e `repocheck <url> --json-only` (sem etapa de LLM, para CI ou quando chamado pela skill).
 2. **Pré-check via API (host)** — identifica a plataforma pela URL e consulta a API pública (idade do repo, estrelas/forks, verificação do autor/org, sinais de typosquatting no nome). Puramente metadado, nunca toca no código. Plataformas desconhecidas pulam essa etapa sem erro.
-3. **Script de análise (dentro da VM Multipass)** — copiado para dentro da VM antes dela subir (nunca baixado do alvo). Executa: clone → corte de rede → scanners estáticos → etapa dinâmica genérica (tenta os passos de build/install que o repo declarar) → captura de telemetria → escreve JSON estruturado.
+3. **Script de análise (dentro da VM Multipass)** — copiado para dentro da VM antes dela subir (nunca baixado do alvo). Executa: clone → scanners estáticos → etapa dinâmica em duas fases (baixar dependências com a rede ligada e sem rodar scripts → cortar a rede → executar os scripts de ciclo de vida/`setup.py` sob strace) → captura de telemetria → escreve JSON estruturado.
 4. **Ciclo de vida da VM (host)** — cria uma instância nova a cada análise (nunca reaproveitada), copia o JSON de saída, e **sempre** destrói a VM ao final — inclusive em timeout/erro/crash.
 5. **Revisão por LLM (sessão Claude Code)** — lê o JSON + trechos sinalizados, decide o que investigar mais a fundo, produz julgamento de intenção.
 6. **Skill do Claude Code** — expõe isso como comando em linguagem natural, chama o `repocheck --json-only`, e apresenta o veredito conversacionalmente.
@@ -60,9 +60,9 @@ Dado uma URL de repositório, produzir um veredito (SAFE / SUSPICIOUS / MALICIOU
 1. Input: URL do repositório (direto ou via linguagem natural na skill).
 2. Pré-check via API (host, segundos) — sinaliza reputação antes de gastar tempo com VM, mas não pula a análise completa por padrão.
 3. Provisionamento de uma VM Multipass nova, a partir de imagem base fixa.
-4. Clone do repositório (rede ligada) seguido de corte de rede dentro da VM.
+4. Clone do repositório (rede ligada).
 5. Scanners estáticos rodam sobre os arquivos sem executar nada.
-6. Etapa dinâmica: passos de build/install declarados são tentados, com toda execução de processo, acesso a arquivo fora do repo e tentativa de rede bloqueada sendo capturada.
+6. Etapa dinâmica (duas fases): as dependências são baixadas com a rede ligada e sem rodar scripts do projeto; então a rede é cortada e o código que uma instalação de fato executa (scripts de ciclo de vida, `setup.py`) roda sob strace, capturando qualquer tentativa de conexão externa após o corte.
 7. Único artefato que sai da VM: o JSON de achados + telemetria (nunca o código-fonte do repositório).
 8. VM é destruída — sempre, mesmo em caminho de erro.
 9. Revisão por LLM (se disponível, na sessão Claude Code).

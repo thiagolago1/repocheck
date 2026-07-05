@@ -297,40 +297,62 @@ def test_cut_network_reports_failure_when_iptables_fails():
     assert "command not found" in result["error"]
 
 
-def test_detect_build_command_finds_npm_for_package_json(tmp_path):
+def test_detect_ecosystem_finds_npm_for_package_json(tmp_path):
     repo_dir = _init_repo(tmp_path)
     (repo_dir / "package.json").write_text('{"name": "example"}')
 
-    command = analyze.detect_build_command(repo_dir)
-
-    assert command == ["npm", "install"]
+    assert analyze.detect_ecosystem(repo_dir) == "npm"
 
 
-def test_detect_build_command_finds_pip_for_requirements_txt(tmp_path):
+def test_detect_ecosystem_finds_pip_for_requirements_txt(tmp_path):
     repo_dir = _init_repo(tmp_path)
     (repo_dir / "requirements.txt").write_text("requests==2.31.0\n")
 
-    command = analyze.detect_build_command(repo_dir)
-
-    assert command == ["pip3", "install", "-r", "requirements.txt"]
+    assert analyze.detect_ecosystem(repo_dir) == "pip-requirements"
 
 
-def test_detect_build_command_finds_pip_for_setup_py(tmp_path):
+def test_detect_ecosystem_finds_pip_for_setup_py(tmp_path):
     repo_dir = _init_repo(tmp_path)
     (repo_dir / "setup.py").write_text("from setuptools import setup\nsetup()\n")
 
-    command = analyze.detect_build_command(repo_dir)
-
-    assert command == ["pip3", "install", "."]
+    assert analyze.detect_ecosystem(repo_dir) == "pip-setup"
 
 
-def test_detect_build_command_returns_none_for_unrecognized_repo(tmp_path):
+def test_detect_ecosystem_returns_none_for_unrecognized_repo(tmp_path):
     repo_dir = _init_repo(tmp_path)
     (repo_dir / "README.md").write_text("# hello\n")
 
-    command = analyze.detect_build_command(repo_dir)
+    assert analyze.detect_ecosystem(repo_dir) is None
 
-    assert command is None
+
+def test_npm_fetch_phase_ignores_scripts_and_exec_phase_runs_them():
+    """The two-phase design: dependencies are fetched with the network up but
+    with lifecycle scripts DISABLED (so a benign npm install isn't flagged),
+    and the scripts are exercised separately in the watched, network-cut
+    phase (npm rebuild for dependencies + the root package's own lifecycle
+    scripts)."""
+    wheel_dir = Path("/tmp/wheels")
+    fetch = analyze._fetch_command("npm", wheel_dir)
+    assert fetch == ["npm", "install", "--ignore-scripts"]
+
+    exec_cmd = analyze._exec_script_command("npm", wheel_dir)
+    assert exec_cmd[:2] == ["bash", "-c"]
+    assert "npm rebuild" in exec_cmd[2]
+    assert "npm run postinstall --if-present" in exec_cmd[2]
+
+
+def test_pip_fetch_phase_only_downloads_and_exec_phase_installs_offline():
+    """pip's setup.py runs at install time, so the analog split is: download
+    (network up) then install offline from the downloaded files (network cut,
+    watched) — the offline install is where any setup.py phones home."""
+    wheel_dir = Path("/tmp/wheels")
+    assert analyze._fetch_command("pip-requirements", wheel_dir) == [
+        "pip3", "download", "-r", "requirements.txt", "-d", str(wheel_dir)
+    ]
+    assert analyze._exec_script_command("pip-requirements", wheel_dir) == [
+        "pip3", "install", "--no-index", "--find-links", str(wheel_dir),
+        "-r", "requirements.txt",
+    ]
 
 
 import subprocess as subprocess_module
@@ -376,7 +398,18 @@ def test_run_dynamic_step_runs_detected_command_and_parses_telemetry(tmp_path):
         result = analyze.run_dynamic_step(repo_dir, timeout=60.0)
 
     assert result["attempted"] is True
-    assert result["command"] == ["pip3", "install", "-r", "requirements.txt"]
+    # `command` reports the watched phase-2 command (offline install), which
+    # is the one whose connection attempts are attributed to the repo.
+    assert result["command"] == [
+        "pip3", "install", "--no-index", "--find-links",
+        str(repo_dir.parent / "wheels"), "-r", "requirements.txt",
+    ]
+    # Phase 1 fetched with the network up and lifecycle code disabled.
+    fetch_call = mock_run.call_args_list[0]
+    assert fetch_call.args[0] == [
+        "pip3", "download", "-r", "requirements.txt", "-d",
+        str(repo_dir.parent / "wheels"),
+    ]
     assert result["exit_code"] == 0
     assert result["timed_out"] is False
     assert result["network_cutoff_applied"] is True
@@ -466,6 +499,40 @@ def test_run_dynamic_step_marks_timed_out_on_timeout_and_kills_process_group(tmp
     mock_killpg.assert_called_once()
     assert mock_killpg.call_args.args[0] == 4242
     proc.wait.assert_called_once()
+
+
+def test_fetch_phase_timeout_does_not_abort_the_dynamic_step(tmp_path):
+    """A large project's dependency download (phase 1, network up) can be
+    slow; if it exceeds its own generous timeout we must still run the
+    watched phase on whatever landed and return a result — never crash the
+    analysis."""
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "package.json").write_text('{"name": "example"}')
+
+    with (
+        patch.object(analyze.subprocess, "run") as mock_run,
+        patch.object(analyze.subprocess, "Popen") as mock_popen,
+    ):
+        def run_side_effect(command, **kwargs):
+            if command[:2] == ["npm", "install"]:
+                raise subprocess_module.TimeoutExpired(cmd=command, timeout=300.0)
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        mock_run.side_effect = run_side_effect
+        proc = MagicMock()
+        proc.communicate.return_value = ("", "")
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        result = analyze.run_dynamic_step(repo_dir, timeout=60.0)
+
+    assert result["attempted"] is True
+    assert result["fetch_timed_out"] is True
+    # The watched phase still ran (Popen was invoked with the exec command).
+    assert mock_popen.called
 
 
 def test_run_includes_dynamic_step_in_combined_report(tmp_path):

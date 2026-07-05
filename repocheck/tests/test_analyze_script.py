@@ -351,7 +351,7 @@ def test_pip_fetch_phase_only_downloads_and_exec_phase_installs_offline():
     ]
     assert analyze._exec_script_command("pip-requirements", wheel_dir) == [
         "pip3", "install", "--no-index", "--find-links", str(wheel_dir),
-        "-r", "requirements.txt",
+        "--break-system-packages", "-r", "requirements.txt",
     ]
 
 
@@ -402,7 +402,8 @@ def test_run_dynamic_step_runs_detected_command_and_parses_telemetry(tmp_path):
     # is the one whose connection attempts are attributed to the repo.
     assert result["command"] == [
         "pip3", "install", "--no-index", "--find-links",
-        str(repo_dir.parent / "wheels"), "-r", "requirements.txt",
+        str(repo_dir.parent / "wheels"), "--break-system-packages",
+        "-r", "requirements.txt",
     ]
     # Phase 1 fetched with the network up and lifecycle code disabled.
     fetch_call = mock_run.call_args_list[0]

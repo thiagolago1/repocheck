@@ -272,7 +272,13 @@ def _exec_script_command(ecosystem: str, wheel_dir: Path) -> list[str]:
     target = (
         ["-r", "requirements.txt"] if ecosystem == "pip-requirements" else ["."]
     )
-    return ["pip3", "install", "--no-index", "--find-links", str(wheel_dir), *target]
+    # --break-system-packages: this phase runs as a root systemd unit on
+    # Ubuntu 24.04, whose system Python is PEP 668 externally-managed and
+    # refuses a bare install (same reason the bootstrap uses the flag).
+    return [
+        "pip3", "install", "--no-index", "--find-links", str(wheel_dir),
+        "--break-system-packages", *target,
+    ]
 
 
 def _is_external_connect(line: str) -> bool:

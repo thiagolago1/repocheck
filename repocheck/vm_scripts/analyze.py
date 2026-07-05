@@ -1,6 +1,8 @@
 import json
+import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import unicodedata
@@ -190,12 +192,22 @@ def run(repo_path: Path, output_path: Path) -> None:
 
 
 def cut_network() -> dict:
+    # A blanket `-P OUTPUT DROP` also blocks the response traffic of the
+    # already-established SSH connection `multipass exec` uses to run this
+    # very script (host -> VM -> host), which makes the host perceive a
+    # hang until its own outer timeout fires (observed live on a repo with
+    # nothing more than a package.json). Explicitly accepting
+    # ESTABLISHED,RELATED traffic keeps that management connection alive
+    # while still blocking any *new* outbound connection the analyzed
+    # repository's own build step might attempt.
     result = subprocess.run(
         [
             "sudo",
             "bash",
             "-c",
-            "iptables -P OUTPUT DROP && iptables -A OUTPUT -o lo -j ACCEPT",
+            "iptables -P OUTPUT DROP && "
+            "iptables -A OUTPUT -o lo -j ACCEPT && "
+            "iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
         ],
         capture_output=True,
         text=True,
@@ -217,6 +229,24 @@ def detect_build_command(repo_path: Path) -> list[str] | None:
     return None
 
 
+def _is_external_connect(line: str) -> bool:
+    """Only genuine external destinations count as cutoff violations.
+
+    The cutoff policy explicitly ACCEPTs loopback traffic, so connects to
+    127.x/::1 (npm hammers the systemd-resolved DNS stub at 127.0.0.53) and
+    local AF_UNIX sockets are allowed by design and must not be flagged.
+    """
+    if "connect(" not in line:
+        return False
+    if "AF_INET" not in line:  # also matches AF_INET6; excludes AF_UNIX etc.
+        return False
+    if 'inet_addr("127.' in line:
+        return False
+    if '"::1"' in line:
+        return False
+    return True
+
+
 def run_dynamic_step(repo_path: Path, timeout: float = 120.0) -> dict:
     command = detect_build_command(repo_path)
     if command is None:
@@ -233,6 +263,11 @@ def run_dynamic_step(repo_path: Path, timeout: float = 120.0) -> dict:
     telemetry_path = repo_path.parent / "telemetry.log"
     wrapped_command = [
         "strace",
+        # Filter syscalls in-kernel (seccomp-bpf) instead of stopping every
+        # traced process on every syscall. Without this, tracing a real npm
+        # install (dozens of forked node processes) loads the single-CPU VM
+        # so heavily that the VM barely responds to anything else.
+        "--seccomp-bpf",
         "-f",
         "-e",
         "trace=connect",
@@ -241,24 +276,34 @@ def run_dynamic_step(repo_path: Path, timeout: float = 120.0) -> dict:
         *command,
     ]
 
+    proc = subprocess.Popen(
+        wrapped_command,
+        cwd=repo_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
     try:
-        result = subprocess.run(
-            wrapped_command,
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        exit_code = result.returncode
+        proc.communicate(timeout=timeout)
+        exit_code = proc.returncode
         timed_out = False
     except subprocess.TimeoutExpired:
+        # Kill the WHOLE process group, not just strace: strace's tracees
+        # (npm/node and their forks) survive strace's own death and — with
+        # the network already cut — keep retrying connections for many
+        # minutes, which keeps this script's systemd unit alive long after
+        # the analysis is over. start_new_session above made `proc` the
+        # group leader, so this reaps every descendant at once.
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
         exit_code = None
         timed_out = True
 
     connect_attempts = []
     if telemetry_path.is_file():
         for line in telemetry_path.read_text(errors="ignore").splitlines():
-            if "connect(" in line:
+            if _is_external_connect(line):
                 connect_attempts.append(line.strip()[:200])
 
     return {

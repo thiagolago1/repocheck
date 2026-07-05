@@ -2,6 +2,7 @@ import json
 import re
 import sys
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,19 @@ _ANALYZE_SCRIPT = _VM_SCRIPTS_DIR / "analyze.py"
 _REMOTE_REPO_PATH = "/home/ubuntu/repo"
 _REMOTE_SCRIPT_PATH = "/home/ubuntu/analyze.py"
 _REMOTE_REPORT_PATH = "/home/ubuntu/report.json"
+_REMOTE_LOG_PATH = "/home/ubuntu/analyze.log"
+
+# The analysis script runs as a detached transient systemd unit instead of
+# as a child of a `multipass exec` session. Reason (verified live): the exec
+# session's SSH channel does not reliably survive the moment analyze.py cuts
+# the VM's network while npm/pip processes are actively attempting outbound
+# connections — the host-side `multipass exec` spins until its own timeout
+# even though the work inside the VM finishes fine. Detaching the work and
+# polling its state with short, fresh exec calls avoids ever holding a
+# connection open across the cutoff.
+_ANALYZE_UNIT = "repocheck-analyze"
+_POLL_INTERVAL_SECONDS = 5.0
+_SHORT_COMMAND_TIMEOUT = 60.0
 
 _BOOTSTRAP_COMMAND = [
     "bash",
@@ -35,7 +49,10 @@ _BOOTSTRAP_COMMAND = [
     # Ubuntu 24.04 marks the system Python as externally-managed (PEP 668),
     # refusing a bare `pip install`. This VM is single-purpose and disposable,
     # so installing straight into the system Python is acceptable here.
-    "pip3 install --quiet --break-system-packages detect-secrets",
+    # sudo (system-wide, /usr/local/bin) rather than --user: the analysis
+    # script runs as a root systemd unit, which doesn't see the ubuntu
+    # user's ~/.local/bin.
+    "sudo pip3 install --quiet --break-system-packages detect-secrets",
 ]
 
 # Matches git's progress-meter lines (e.g. "Updating files:  43% (180/414)"),
@@ -110,15 +127,75 @@ def run_analysis(
             on_progress("🔬 Running static and dynamic analysis (network is cut before any build step)...")
             vm.push_file(_ANALYZE_SCRIPT, _REMOTE_SCRIPT_PATH)
 
-            analyze_result = vm.run(
-                ["python3", _REMOTE_SCRIPT_PATH, _REMOTE_REPO_PATH, _REMOTE_REPORT_PATH],
-                timeout=timeout,
+            launch_result = vm.run(
+                [
+                    "sudo",
+                    "systemd-run",
+                    f"--unit={_ANALYZE_UNIT}",
+                    "bash",
+                    "-c",
+                    f"python3 {_REMOTE_SCRIPT_PATH} {_REMOTE_REPO_PATH} "
+                    f"{_REMOTE_REPORT_PATH} > {_REMOTE_LOG_PATH} 2>&1",
+                ],
+                timeout=_SHORT_COMMAND_TIMEOUT,
             )
-            if analyze_result.returncode != 0:
+            if launch_result.returncode != 0:
                 return AnalysisReport(
                     clone_succeeded=True,
-                    error=f"analysis script failed: {analyze_result.stderr.strip()}",
+                    error=f"failed to start the analysis unit: {launch_result.stderr.strip()}",
                 )
+
+            # The report file's existence is the completion signal — NOT the
+            # unit state: leftover npm/node processes can keep the unit
+            # 'active' for minutes after the report is already written.
+            # The unit state is only consulted to detect the script dying
+            # early without producing a report.
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    report_check = vm.run(
+                        ["test", "-f", _REMOTE_REPORT_PATH],
+                        timeout=_SHORT_COMMAND_TIMEOUT,
+                    )
+                except VMCommandTimeout:
+                    # Under strace, npm/pip can load the single-CPU VM so
+                    # heavily that even this trivial poll misses its own
+                    # timeout (observed live). That means "busy, still
+                    # running" — keep polling until the overall deadline.
+                    report_check = None
+                if report_check is not None and report_check.returncode == 0:
+                    break
+                if report_check is not None:
+                    try:
+                        state_result = vm.run(
+                            ["systemctl", "is-active", _ANALYZE_UNIT],
+                            timeout=_SHORT_COMMAND_TIMEOUT,
+                        )
+                    except VMCommandTimeout:
+                        state_result = None
+                    if state_result is not None and state_result.stdout.strip() not in (
+                        "active",
+                        "activating",
+                    ):
+                        log_result = vm.run(
+                            ["cat", _REMOTE_LOG_PATH], timeout=_SHORT_COMMAND_TIMEOUT
+                        )
+                        detail = (
+                            log_result.stdout.strip()[-500:] or "no output captured"
+                        )
+                        return AnalysisReport(
+                            clone_succeeded=True,
+                            error=f"analysis script failed: {detail}",
+                        )
+                if time.monotonic() > deadline:
+                    return AnalysisReport(
+                        clone_succeeded=True,
+                        error=(
+                            f"analysis did not finish within the {timeout:.0f}s "
+                            "timeout (the analysis unit was still running)"
+                        ),
+                    )
+                time.sleep(_POLL_INTERVAL_SECONDS)
 
             on_progress("📦 Collecting results and destroying the VM...")
             local_report_path = _local_temp_report_path()

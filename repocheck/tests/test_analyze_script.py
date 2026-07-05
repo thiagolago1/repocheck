@@ -257,6 +257,28 @@ def test_cut_network_applies_iptables_rules_successfully():
     assert "iptables" in " ".join(command)
 
 
+def test_cut_network_keeps_established_connections_alive():
+    """Regression test: a blanket `iptables -P OUTPUT DROP` also blocks the
+    response traffic of the already-established SSH connection `multipass
+    exec` uses to run this very script, making the host perceive a hang
+    until its own outer timeout fires (observed live: a 600s timeout on a
+    small repo with just a package.json). The fix must keep an explicit
+    ACCEPT rule for ESTABLISHED,RELATED traffic so the management
+    connection survives while brand-new outbound connections are still
+    blocked."""
+    with patch.object(analyze.subprocess, "run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+
+        analyze.cut_network()
+
+    call_args = mock_run.call_args
+    command = call_args.args[0]
+    joined = " ".join(command)
+    assert "ESTABLISHED,RELATED" in joined
+    assert "-j ACCEPT" in joined
+
+
 def test_cut_network_reports_failure_when_iptables_fails():
     with patch.object(analyze.subprocess, "run") as mock_run:
         mock_run.return_value.returncode = 1
@@ -333,18 +355,16 @@ def test_run_dynamic_step_runs_detected_command_and_parses_telemetry(tmp_path):
         "openat(AT_FDCWD, \"/etc/passwd\", O_RDONLY) = 3\n"
     )
 
-    with patch.object(analyze.subprocess, "run") as mock_run:
-
-        def run_side_effect(command, **kwargs):
-            result = MagicMock()
-            if command[:2] == ["sudo", "bash"]:
-                result.returncode = 0
-                result.stderr = ""
-            else:
-                result.returncode = 0
-            return result
-
-        mock_run.side_effect = run_side_effect
+    with (
+        patch.object(analyze.subprocess, "run") as mock_run,
+        patch.object(analyze.subprocess, "Popen") as mock_popen,
+    ):
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+        proc = MagicMock()
+        proc.communicate.return_value = ("", "")
+        proc.returncode = 0
+        mock_popen.return_value = proc
 
         result = analyze.run_dynamic_step(repo_dir, timeout=60.0)
 
@@ -355,29 +375,86 @@ def test_run_dynamic_step_runs_detected_command_and_parses_telemetry(tmp_path):
     assert result["network_cutoff_applied"] is True
     assert len(result["network_connect_attempts"]) == 1
     assert "connect(" in result["network_connect_attempts"][0]
+    popen_kwargs = mock_popen.call_args.kwargs
+    assert popen_kwargs["start_new_session"] is True
 
 
-def test_run_dynamic_step_marks_timed_out_on_timeout(tmp_path):
+def test_telemetry_only_counts_external_inet_connects(tmp_path):
+    """The network cutoff policy explicitly ACCEPTs loopback traffic, so
+    connects to 127.x (e.g. the systemd-resolved DNS stub at 127.0.0.53,
+    which npm hits dozens of times) and local AF_UNIX sockets must NOT be
+    counted as 'attempts after the cutoff' — only genuine external
+    AF_INET/AF_INET6 destinations are violations. (Observed live: a benign
+    npm project was flagged MALICIOUS on 54 loopback/unix connects.)"""
+    repo_dir = _init_repo(tmp_path)
+    (repo_dir / "package.json").write_text('{"name": "example"}')
+    telemetry_path = repo_dir.parent / "telemetry.log"
+    telemetry_path.write_text(
+        # external IPv4: must count
+        'connect(3, {sa_family=AF_INET, sin_port=htons(443), '
+        'sin_addr=inet_addr("93.184.216.34")}, 16) = -1 EPERM\n'
+        # loopback DNS stub: must NOT count
+        'connect(4, {sa_family=AF_INET, sin_port=htons(53), '
+        'sin_addr=inet_addr("127.0.0.53")}, 16) = 0\n'
+        # unix socket: must NOT count
+        'connect(5, {sa_family=AF_UNIX, sun_path="/run/systemd/resolve/io.systemd.Resolve"}, 42) = 0\n'
+        # IPv6 loopback: must NOT count
+        'connect(6, {sa_family=AF_INET6, sin6_port=htons(443), '
+        'sin6_addr=inet_pton(AF_INET6, "::1", &sin6_addr)}, 28) = -1 EPERM\n'
+        # external IPv6: must count
+        'connect(7, {sa_family=AF_INET6, sin6_port=htons(443), '
+        'sin6_addr=inet_pton(AF_INET6, "2606:4700::6810:84e5", &sin6_addr)}, 28) = -1 EPERM\n'
+    )
+
+    with (
+        patch.object(analyze.subprocess, "run") as mock_run,
+        patch.object(analyze.subprocess, "Popen") as mock_popen,
+    ):
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+        proc = MagicMock()
+        proc.communicate.return_value = ("", "")
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        result = analyze.run_dynamic_step(repo_dir, timeout=60.0)
+
+    assert len(result["network_connect_attempts"]) == 2
+    assert '93.184.216.34' in result["network_connect_attempts"][0]
+    assert "2606:4700" in result["network_connect_attempts"][1]
+
+
+def test_run_dynamic_step_marks_timed_out_on_timeout_and_kills_process_group(tmp_path):
+    """On timeout the WHOLE process group must be killed, not just strace:
+    strace's tracees (npm/node) survive strace's own death and — with the
+    network cut — keep retrying connections for many minutes, keeping the
+    systemd analysis unit 'active' long after this script returns (this was
+    the live 600s-timeout bug's final root cause)."""
     repo_dir = _init_repo(tmp_path)
     (repo_dir / "package.json").write_text('{"name": "example"}')
 
-    with patch.object(analyze.subprocess, "run") as mock_run:
-
-        def run_side_effect(command, **kwargs):
-            if command[:2] == ["sudo", "bash"]:
-                result = MagicMock()
-                result.returncode = 0
-                result.stderr = ""
-                return result
-            raise subprocess_module.TimeoutExpired(cmd=command, timeout=60.0)
-
-        mock_run.side_effect = run_side_effect
+    with (
+        patch.object(analyze.subprocess, "run") as mock_run,
+        patch.object(analyze.subprocess, "Popen") as mock_popen,
+        patch.object(analyze.os, "killpg") as mock_killpg,
+    ):
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stderr = ""
+        proc = MagicMock()
+        proc.pid = 4242
+        proc.communicate.side_effect = subprocess_module.TimeoutExpired(
+            cmd=["strace"], timeout=60.0
+        )
+        mock_popen.return_value = proc
 
         result = analyze.run_dynamic_step(repo_dir, timeout=60.0)
 
     assert result["attempted"] is True
     assert result["timed_out"] is True
     assert result["exit_code"] is None
+    mock_killpg.assert_called_once()
+    assert mock_killpg.call_args.args[0] == 4242
+    proc.wait.assert_called_once()
 
 
 def test_run_includes_dynamic_step_in_combined_report(tmp_path):

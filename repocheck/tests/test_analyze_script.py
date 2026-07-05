@@ -257,15 +257,20 @@ def test_cut_network_applies_iptables_rules_successfully():
     assert "iptables" in " ".join(command)
 
 
-def test_cut_network_keeps_established_connections_alive():
-    """Regression test: a blanket `iptables -P OUTPUT DROP` also blocks the
-    response traffic of the already-established SSH connection `multipass
-    exec` uses to run this very script, making the host perceive a hang
-    until its own outer timeout fires (observed live: a 600s timeout on a
-    small repo with just a package.json). The fix must keep an explicit
-    ACCEPT rule for ESTABLISHED,RELATED traffic so the management
-    connection survives while brand-new outbound connections are still
-    blocked."""
+def test_cut_network_keeps_only_ssh_replies_alive():
+    """Two live regressions meet here:
+
+    1. A blanket `iptables -P OUTPUT DROP` also blocks the response traffic
+       of the established SSH connection the host uses to manage the VM,
+       making the host perceive a hang until its outer timeout fires.
+    2. A broad `--state ESTABLISHED,RELATED -j ACCEPT` fixes (1) but lets
+       DNS leak through pre-cutoff conntrack UDP flows (observed live:
+       registry.npmjs.org resolved AFTER the cutoff) — a real
+       DNS-exfiltration hole.
+
+    The rule must therefore be scoped to exactly the management channel:
+    established TCP traffic FROM source port 22 (sshd's replies), nothing
+    else."""
     with patch.object(analyze.subprocess, "run") as mock_run:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stderr = ""
@@ -275,7 +280,9 @@ def test_cut_network_keeps_established_connections_alive():
     call_args = mock_run.call_args
     command = call_args.args[0]
     joined = " ".join(command)
-    assert "ESTABLISHED,RELATED" in joined
+    assert "-p tcp --sport 22" in joined
+    assert "ESTABLISHED" in joined
+    assert "ESTABLISHED,RELATED" not in joined
     assert "-j ACCEPT" in joined
 
 
@@ -404,6 +411,10 @@ def test_telemetry_only_counts_external_inet_connects(tmp_path):
         # external IPv6: must count
         'connect(7, {sa_family=AF_INET6, sin6_port=htons(443), '
         'sin6_addr=inet_pton(AF_INET6, "2606:4700::6810:84e5", &sin6_addr)}, 28) = -1 EPERM\n'
+        # port-0 UDP address-selection probe (transmits nothing — node/glibc
+        # use these to rank candidate addresses): must NOT count
+        'connect(25, {sa_family=AF_INET, sin_port=htons(0), '
+        'sin_addr=inet_addr("104.16.1.34")}, 16) = 0\n'
     )
 
     with (

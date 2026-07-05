@@ -193,13 +193,15 @@ def run(repo_path: Path, output_path: Path) -> None:
 
 def cut_network() -> dict:
     # A blanket `-P OUTPUT DROP` also blocks the response traffic of the
-    # already-established SSH connection `multipass exec` uses to run this
-    # very script (host -> VM -> host), which makes the host perceive a
-    # hang until its own outer timeout fires (observed live on a repo with
-    # nothing more than a package.json). Explicitly accepting
-    # ESTABLISHED,RELATED traffic keeps that management connection alive
-    # while still blocking any *new* outbound connection the analyzed
-    # repository's own build step might attempt.
+    # already-established SSH connection the host uses to manage the VM,
+    # which makes the host perceive a hang until its own outer timeout
+    # fires (observed live on a repo with nothing more than a
+    # package.json). But a broad `--state ESTABLISHED,RELATED` accept lets
+    # DNS leak through pre-cutoff conntrack UDP flows (observed live:
+    # registry.npmjs.org resolved AFTER the cutoff) — a real
+    # DNS-exfiltration hole. So the accept is scoped to exactly the
+    # management channel: established TCP traffic FROM source port 22
+    # (sshd's replies) and nothing else.
     result = subprocess.run(
         [
             "sudo",
@@ -207,7 +209,8 @@ def cut_network() -> dict:
             "-c",
             "iptables -P OUTPUT DROP && "
             "iptables -A OUTPUT -o lo -j ACCEPT && "
-            "iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
+            "iptables -A OUTPUT -p tcp --sport 22 "
+            "-m state --state ESTABLISHED -j ACCEPT",
         ],
         capture_output=True,
         text=True,
@@ -243,6 +246,11 @@ def _is_external_connect(line: str) -> bool:
     if 'inet_addr("127.' in line:
         return False
     if '"::1"' in line:
+        return False
+    # Port-0 UDP connects are node/glibc address-selection probes: they
+    # transmit nothing and happen for every resolved address, so they are
+    # noise, not communication attempts.
+    if "htons(0)" in line:
         return False
     return True
 

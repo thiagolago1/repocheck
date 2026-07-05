@@ -69,7 +69,13 @@ def compute_verdict(
         )
 
     if analysis.network_connect_attempts:
-        malicious_reasons.append(
+        # The dynamic step cuts the network then runs the package manager,
+        # whose job is to fetch declared dependencies — so every normal
+        # project with dependencies produces attempts here. Surface it, but
+        # don't call it malicious on its own (that would flag essentially
+        # every npm/pip project). MALICIOUS is reserved for the signals
+        # below that genuinely imply intent.
+        suspicious_reasons.append(
             f"{len(analysis.network_connect_attempts)} network connection attempt(s) "
             "after the network cutoff"
         )

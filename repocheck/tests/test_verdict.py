@@ -78,10 +78,17 @@ def test_gitmodules_ext_transport_is_malicious():
     assert result.verdict == Verdict.MALICIOUS
 
 
-def test_network_connect_attempts_after_cutoff_is_malicious():
+def test_network_connect_attempts_after_cutoff_is_suspicious_not_malicious():
+    """The dynamic step cuts the network then runs the package manager
+    (npm/pip), whose documented job is to fetch declared dependencies — so
+    every normal project with dependencies produces connection attempts
+    after the cutoff. That is worth surfacing (SUSPICIOUS) but is not, on
+    its own, evidence of malice; MALICIOUS is reserved for malicious
+    patterns, ext:: submodules, and secrets."""
     analysis = _make_analysis(network_connect_attempts=["connect(3, ...)"])
     result = compute_verdict(_make_precheck(), analysis)
-    assert result.verdict == Verdict.MALICIOUS
+    assert result.verdict == Verdict.SUSPICIOUS
+    assert any("network connection attempt" in r for r in result.reasons)
 
 
 def test_other_git_finding_is_suspicious_not_malicious():

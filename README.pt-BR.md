@@ -36,10 +36,11 @@ O `repocheck` nunca clona nem executa nada do repositório-alvo no seu host. Tud
    - Detecção de secrets (via [`detect-secrets`](https://github.com/Yelp/detect-secrets))
    - Padrões maliciosos (`curl | bash`, `eval` ofuscado, PowerShell codificado, etc.)
    - Checagens específicas de git (submódulos com transporte `ext::`, filtros customizados no `.gitattributes`, diretórios `.git` aninhados, nomes de arquivo com RTLO/homóglifos)
-4. **Corte de rede** — a rede da VM é cortada (`iptables`) exatamente antes de qualquer etapa de build/instalação, e nunca antes disso — a análise estática não precisa de rede pra ser segura.
-5. **Etapa dinâmica** — se um sistema de build `npm`/`pip` for detectado, ele é executado com a rede já cortada, envolto em `strace` pra capturar qualquer tentativa de conexão (um sinal forte de intenção maliciosa, já que nada deveria tentar "ligar pra casa" sem rede).
-6. **Veredito** — um motor determinístico baseado em regras combina todos os sinais acima em `SAFE` / `SUSPICIOUS` / `MALICIOUS` (em inglês, para consistência internacional), sempre com motivos explícitos. Uma falha de scanner ou ausência de análise **nunca** vira "seguro" silenciosamente.
-7. **Skill do Claude Code (opcional)** — pergunte em linguagem natural ("esse repositório é seguro pra instalar?") e o Claude roda o CLI, lê o veredito e os trechos já sinalizados, e complementa com o próprio julgamento — sem nunca tocar o repositório-alvo de novo (a VM já foi destruída quando o CLI retorna).
+4. **Etapa dinâmica (duas fases)** — se um projeto `npm`/`pip` for detectado, a instalação é exercitada em duas fases separadas, pra que buscar dependências nunca seja confundido com malícia:
+   - *Buscar (rede ligada, não vigiada):* as dependências são baixadas com o código de ciclo de vida desabilitado (`npm install --ignore-scripts` / `pip download`). Um gerenciador de pacotes acessando seu registry é comportamento esperado, não um sinal.
+   - *Executar (rede cortada, vigiada):* com a rede então cortada via `iptables`, o código que uma instalação de fato roda — scripts de ciclo de vida (`postinstall`, etc.) e `setup.py` — é executado sob `strace`. Aqui, qualquer tentativa de conexão de saída é um sinal genuíno, já que um script de build não tem motivo legítimo pra "ligar pra casa" sem rede.
+5. **Veredito** — um motor determinístico baseado em regras combina todos os sinais acima em `SAFE` / `SUSPICIOUS` / `MALICIOUS` (em inglês, para consistência internacional), sempre com motivos explícitos. Uma falha de scanner ou ausência de análise **nunca** vira "seguro" silenciosamente.
+6. **Skill do Claude Code (opcional)** — pergunte em linguagem natural ("esse repositório é seguro pra instalar?") e o Claude roda o CLI, lê o veredito e os trechos já sinalizados, e complementa com o próprio julgamento — sem nunca tocar o repositório-alvo de novo (a VM já foi destruída quando o CLI retorna).
 
 ## Tecnologias usadas
 

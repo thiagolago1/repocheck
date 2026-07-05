@@ -36,10 +36,11 @@ Some malicious repositories execute code the moment you clone or install them: g
    - Secret detection (via [`detect-secrets`](https://github.com/Yelp/detect-secrets))
    - Malicious pattern matching (`curl | bash`, obfuscated `eval`, encoded PowerShell, etc.)
    - Git-specific checks (`ext::` submodule transports, custom `.gitattributes` filters, nested `.git` directories, RTLO/homoglyph filenames)
-4. **Network cutoff** — the VM's network is cut (`iptables`) right before any build/install step, and never before — static analysis never needs network access to be safe.
-5. **Dynamic step** — if an `npm`/`pip` build system is detected, it's attempted with the network already cut, wrapped in `strace` to capture any connection attempt (a strong signal of malicious intent, since nothing should be phoning home with no network).
-6. **Verdict** — a deterministic, rules-based engine combines every signal above into `SAFE` / `SUSPICIOUS` / `MALICIOUS`, always with explicit reasons. A scanner failure or missing analysis **never** silently resolves to `SAFE`.
-7. **Claude Code skill (optional)** — ask conversationally ("is this repo safe to install?") and Claude will run the CLI, read the verdict and the already-flagged snippets, and add its own judgment on top of the rules — without ever touching the target repository itself (the VM is already gone by the time the CLI returns).
+4. **Dynamic step (two phases)** — if an `npm`/`pip` project is detected, its install is exercised in two separate phases so that fetching dependencies is never mistaken for malice:
+   - *Fetch (network up, not watched):* dependencies are downloaded with lifecycle code disabled (`npm install --ignore-scripts` / `pip download`). A package manager reaching its registry is expected behaviour, not a signal.
+   - *Execute (network cut, watched):* with the network then cut via `iptables`, the code an install actually runs — lifecycle scripts (`postinstall`, etc.) and `setup.py` — is executed under `strace`. Here any outbound connection attempt is a genuine signal, since a build script has no legitimate reason to phone home with the network gone.
+5. **Verdict** — a deterministic, rules-based engine combines every signal above into `SAFE` / `SUSPICIOUS` / `MALICIOUS`, always with explicit reasons. A scanner failure or missing analysis **never** silently resolves to `SAFE`.
+6. **Claude Code skill (optional)** — ask conversationally ("is this repo safe to install?") and Claude will run the CLI, read the verdict and the already-flagged snippets, and add its own judgment on top of the rules — without ever touching the target repository itself (the VM is already gone by the time the CLI returns).
 
 ## Tech stack
 
